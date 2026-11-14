@@ -79,7 +79,10 @@ export default function SignInScreen() {
               onChangeText={setPassword}
             />
 
-            <TouchableOpacity style={styles.forgotPassBtn}>
+             <TouchableOpacity
+              style={styles.forgotPassBtn}
+              onPress={() => navigation.navigate('ForgotPassword')}
+            >
               <Text style={styles.forgotPassText}>Quên mật khẩu?</Text>
             </TouchableOpacity>
 

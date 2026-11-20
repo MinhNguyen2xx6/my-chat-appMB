@@ -9,7 +9,7 @@ import {
 
 const api = axios.create({
   baseURL: API_URL,
-  timeout: 10000,
+  timeout: 60000, // 1. Tăng timeout lên 60s cho Render Cold Start
   headers: { 'x-client': 'mobile' },
 });
 
@@ -21,18 +21,24 @@ export const setOnLoggedOut = (fn: () => void) => {
 export const refreshAccessToken = async (): Promise<string> => {
   const rt = await getRefreshToken();
   if (!rt) throw new Error('no refresh token');
+  
+  // Dùng api instance hoặc giữ nguyên axios root tùy cấu hình route backend
   const { data } = await axios.post(
     `${API_URL}/auth/refresh`,
     { refreshToken: rt },
     { headers: { 'x-client': 'mobile' } },
   );
-  setAccessToken(data.accessToken);
+  
+  await setAccessToken(data.accessToken); // Thêm await nếu setAccessToken là async
   return data.accessToken;
 };
 
-api.interceptors.request.use((config) => {
-  const token = getAccessToken();
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+// 2. Chuyển callback thành async/await để lấy token đúng cách
+api.interceptors.request.use(async (config) => {
+  const token = await getAccessToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
   return config;
 });
 
@@ -47,7 +53,7 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && !original._retry && !isAuthRoute) {
       original._retry = true;
       try {
-        // nhiều request 401 cùng lúc thì chỉ refresh 1 lần
+        // Xử lý chống trùng lặp request refresh token
         refreshPromise ??= refreshAccessToken().finally(() => {
           refreshPromise = null;
         });

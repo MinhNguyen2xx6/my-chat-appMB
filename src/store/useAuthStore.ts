@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import api, { refreshAccessToken, setOnLoggedOut } from '../services/api/client';
+import { useChatStore } from './useChatStore';
 import {
   saveRefreshToken,
   getRefreshToken,
@@ -71,9 +72,13 @@ export const useAuthStore = create<AuthState>((set) => ({
       await api.post('/auth/signout', { refreshToken: rt });
     } catch {}
     await clearTokens();
+    useChatStore.getState().reset();
     set({ user: null });
   },
 }));
 
 // Khi refresh thất bại, client.ts gọi hàm này để đẩy về màn đăng nhập
-setOnLoggedOut(() => useAuthStore.setState({ user: null }));
+setOnLoggedOut(() => {
+  useChatStore.getState().reset();
+  useAuthStore.setState({ user: null });
+});

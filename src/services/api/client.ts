@@ -7,36 +7,51 @@ import {
   clearTokens,
 } from '../../utils/storage';
 
-const api = axios.create({
-  baseURL: API_URL,
-  timeout: 10000,
-  headers: { 'x-client': 'mobile' },
+// --------------------
+// 1. Tạo Axios instance
+// --------------------
+export const api = axios.create({
+  baseURL: API_URL,                     // URL backend (được đọc từ constants.ts)
+  timeout: 60000,                       // 60 giây, đủ cho cold‑start
+  headers: { 'x-client': 'mobile' },   // backend dùng tiêu đề này để phân biệt client
 });
 
-let onLoggedOut: () => void = () => {};
-export const setOnLoggedOut = (fn: () => void) => {
-  onLoggedOut = fn;
-};
-
+// --------------------
+// 2. Refresh token logic
+// --------------------
 export const refreshAccessToken = async (): Promise<string> => {
   const rt = await getRefreshToken();
   if (!rt) throw new Error('no refresh token');
+
+  // Gửi yêu cầu refresh tới backend
   const { data } = await axios.post(
     `${API_URL}/auth/refresh`,
     { refreshToken: rt },
-    { headers: { 'x-client': 'mobile' } },
+    { headers: { 'x-client': 'mobile' } }
   );
-  setAccessToken(data.accessToken);
+
+  await setAccessToken(data.accessToken);
   return data.accessToken;
 };
 
-api.interceptors.request.use((config) => {
-  const token = getAccessToken();
+// --------------------
+// 3. Request interceptor – đưa token vào mỗi request
+// --------------------
+api.interceptors.request.use(async (config) => {
+  const token = await getAccessToken();
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
+// --------------------
+// 4. Response interceptor – tự động refresh khi 401
+// --------------------
 let refreshPromise: Promise<string> | null = null;
+let onLoggedOut: () => void = () => {};
+
+export const setOnLoggedOut = (fn: () => void) => {
+  onLoggedOut = fn;
+};
 
 api.interceptors.response.use(
   (res) => res,
@@ -47,20 +62,18 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && !original._retry && !isAuthRoute) {
       original._retry = true;
       try {
-        // nhiều request 401 cùng lúc thì chỉ refresh 1 lần
-        refreshPromise ??= refreshAccessToken().finally(() => {
-          refreshPromise = null;
-        });
+        // Không cho nhiều request refresh đồng thời
+        refreshPromise ??= refreshAccessToken().finally(() => (refreshPromise = null));
         const newToken = await refreshPromise;
         original.headers.Authorization = `Bearer ${newToken}`;
-        return api(original);
+        return api(original);                     // retry request
       } catch {
         await clearTokens();
-        onLoggedOut();
+        onLoggedOut();                           // thông báo UI logout
       }
     }
     return Promise.reject(error);
-  },
+  }
 );
 
 export default api;

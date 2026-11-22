@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   Image,
@@ -50,15 +51,28 @@ export default function ChatDetailScreen() {
   const markAsRead = useChatStore((s) => s.markAsRead);
   const sendMessage = useChatStore((s) => s.sendMessage);
   const fetchMessages = useChatStore((s) => s.fetchMessages);
+  const fetchConversationById = useChatStore((s) => s.fetchConversationById);
   const myUserId = useAuthStore((s) => s.user?._id);
 
   const listRef = useRef<FlatList<Message>>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [loadingConv, setLoadingConv] = useState(!conversation);
 
   useEffect(() => {
     markAsRead(conversationId);
     fetchMessages(conversationId);
-  }, [conversationId, markAsRead, fetchMessages]);
+    const exists = useChatStore
+      .getState()
+      .conversations.some((c) => c.id === conversationId);
+    if (!exists) {
+      setLoadingConv(true);
+      fetchConversationById(conversationId).finally(() =>
+        setLoadingConv(false),
+      );
+    } else {
+      setLoadingConv(false);
+    }
+  }, [conversationId, markAsRead, fetchMessages, fetchConversationById]);
 
   const lastOwnMessageId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -73,6 +87,13 @@ export default function ChatDetailScreen() {
   }, [messages, myUserId]);
 
   if (!conversation) {
+    if (loadingConv) {
+      return (
+        <View style={styles.missingBox}>
+          <ActivityIndicator size="large" color={Theme.colors.primary} />
+        </View>
+      );
+    }
     return (
       <View style={styles.missingBox}>
         <Text style={styles.missingText}>Cuộc trò chuyện không còn tồn tại.</Text>

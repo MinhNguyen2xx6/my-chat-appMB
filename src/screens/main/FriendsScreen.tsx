@@ -36,6 +36,7 @@ export default function FriendsScreen() {
     loadingFriends,
     fetchFriends,
     getOrCreateDirectConversation,
+    removeFriend,
   } = useChatStore();
 
   const [query, setQuery] = useState('');
@@ -107,6 +108,36 @@ export default function FriendsScreen() {
     if (convId) {
       navigation.navigate('ChatDetail', { conversationId: convId });
     }
+  };
+
+  const handleRemoveFriend = (friend: Friend) => {
+    const targetId = friend.friendshipId;
+    if (!targetId) {
+      Alert.alert('Thông báo', 'Không tìm thấy thông tin kết bạn để hủy.');
+      return;
+    }
+    Alert.alert(
+      'Hủy kết bạn',
+      `Bạn có chắc muốn hủy kết bạn với "${friend.name}"?`,
+      [
+        { text: 'Hủy', style: 'cancel' },
+        {
+          text: 'Hủy kết bạn',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await removeFriend(targetId);
+              Alert.alert('Thành công', `Đã hủy kết bạn với ${friend.name}.`);
+            } catch (err: any) {
+              Alert.alert(
+                'Lỗi',
+                err?.response?.data?.message || 'Không thể hủy kết bạn',
+              );
+            }
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -202,7 +233,7 @@ export default function FriendsScreen() {
                 <View style={styles.featureTextCol}>
                   <Text style={styles.featureTitle}>Thêm bạn mới</Text>
                   <Text style={styles.featureSubtitle}>
-                    Tìm kiếm theo tên hoặc username
+                    Tìm theo tên người dùng hoặc mã QR
                   </Text>
                 </View>
                 <Text style={styles.chevron}>›</Text>
@@ -256,6 +287,7 @@ export default function FriendsScreen() {
               style={styles.friendRow}
               activeOpacity={0.7}
               onPress={() => handleOpenFriendChat(item)}
+              onLongPress={() => handleRemoveFriend(item)}
             >
               <Avatar
                 name={item.name}
@@ -277,6 +309,14 @@ export default function FriendsScreen() {
                 }
               >
                 <Text style={styles.callIconText}>📞</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.unfriendIconBtn}
+                onPress={() => handleRemoveFriend(item)}
+                accessibilityLabel="Hủy kết bạn"
+              >
+                <Text style={styles.unfriendIconText}>✕</Text>
               </TouchableOpacity>
             </TouchableOpacity>
           )}
@@ -504,6 +544,15 @@ const styles = StyleSheet.create({
   },
   callIconText: {
     fontSize: 18,
+  },
+  unfriendIconBtn: {
+    padding: 8,
+    marginLeft: 2,
+  },
+  unfriendIconText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: Theme.colors.danger,
   },
   oaAvatar: {
     width: 46,

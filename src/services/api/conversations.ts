@@ -14,6 +14,18 @@ export const getMessages = (convId: string, before?: string, limit: number = 30)
     params: { before, limit },
   });
 
+// Lấy thông tin 1 cuộc trò chuyện
+export const getConversationById = (convId: string) =>
+  api.get(`/conversations/${convId}`);
+
+// Xóa hoàn toàn một cuộc trò chuyện
+export const deleteConversation = (convId: string) =>
+  api.delete(`/conversations/${convId}`);
+
+// Xóa lịch sử tin nhắn của một cuộc trò chuyện
+export const clearMessages = (convId: string) =>
+  api.delete(`/conversations/${convId}/messages`);
+
 // Gửi tin nhắn văn bản
 export const sendTextMessage = (convId: string, text: string) =>
   api.post(`/conversations/${convId}/messages`, { text });

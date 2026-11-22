@@ -36,12 +36,20 @@ export default function ConversationInfoScreen() {
   );
   const messages = rawMessages || EMPTY_MESSAGES;
   const {
+    friends,
     toggleMuteConversation,
     togglePinConversation,
     toggleBlockConversation,
     leaveGroup,
     clearConversationHistory,
+    removeFriend,
   } = useChatStore();
+
+  const matchedFriend = useMemo(() => {
+    if (!conversation || conversation.isGroup) return null;
+    const otherIds = conversation.members.map((m) => m.id);
+    return friends.find((f) => otherIds.includes(f.id)) ?? null;
+  }, [conversation, friends]);
 
   const sharedImages = useMemo(
     () => messages.filter((m) => m.type === 'image' && m.imageUrl),
@@ -69,6 +77,33 @@ export default function ConversationInfoScreen() {
           onPress: () => {
             leaveGroup(conversation.id);
             navigation.popToTop();
+          },
+        },
+      ],
+    );
+  };
+
+  const handleRemoveFriend = () => {
+    if (!matchedFriend?.friendshipId) return;
+    Alert.alert(
+      'Hủy kết bạn',
+      `Bạn có chắc muốn hủy kết bạn với "${conversation.name}"? Hai bạn sẽ không thể tiếp tục nhắn tin cho đến khi kết bạn lại.`,
+      [
+        { text: 'Hủy', style: 'cancel' },
+        {
+          text: 'Hủy kết bạn',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await removeFriend(matchedFriend.friendshipId!);
+              Alert.alert('Thành công', `Đã hủy kết bạn với ${conversation.name}.`);
+              navigation.popToTop();
+            } catch (err: any) {
+              Alert.alert(
+                'Lỗi',
+                err?.response?.data?.message || 'Không thể hủy kết bạn',
+              );
+            }
           },
         },
       ],
@@ -351,17 +386,28 @@ export default function ConversationInfoScreen() {
               <Text style={styles.dangerText}>Rời nhóm</Text>
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity
-              style={styles.dangerRow}
-              onPress={handleToggleBlock}
-            >
-              <Text style={styles.dangerIcon}>🚫</Text>
-              <Text style={styles.dangerText}>
-                {conversation.isBlocked
-                  ? 'Bỏ chặn người dùng này'
-                  : 'Chặn người dùng này'}
-              </Text>
-            </TouchableOpacity>
+            <>
+              {matchedFriend?.friendshipId && (
+                <TouchableOpacity
+                  style={[styles.dangerRow, styles.rowDivider]}
+                  onPress={handleRemoveFriend}
+                >
+                  <Text style={styles.dangerIcon}>💔</Text>
+                  <Text style={styles.dangerText}>Hủy kết bạn</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={styles.dangerRow}
+                onPress={handleToggleBlock}
+              >
+                <Text style={styles.dangerIcon}>🚫</Text>
+                <Text style={styles.dangerText}>
+                  {conversation.isBlocked
+                    ? 'Bỏ chặn người dùng này'
+                    : 'Chặn người dùng này'}
+                </Text>
+              </TouchableOpacity>
+            </>
           )}
         </View>
       </ScrollView>

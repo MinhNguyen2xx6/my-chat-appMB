@@ -84,14 +84,15 @@ interface ChatStoreState {
   fetchFriends: () => Promise<void>;
   fetchFriendRequests: () => Promise<void>;
   fetchMessages: (convId: string) => Promise<void>;
+  fetchConversationById: (id: string) => Promise<Conversation | null>;
 
   // Conversation actions
   togglePinConversation: (id: string) => void;
   toggleMuteConversation: (id: string) => void;
   markAsRead: (id: string) => void;
   toggleReadStatus: (id: string) => void;
-  deleteConversation: (id: string) => void;
-  clearConversationHistory: (id: string) => void;
+  deleteConversation: (id: string) => Promise<void>;
+  clearConversationHistory: (id: string) => Promise<void>;
   leaveGroup: (id: string) => void;
   toggleBlockConversation: (id: string) => void;
   createGroup: (name: string, memberIds: string[]) => string;
@@ -106,7 +107,8 @@ interface ChatStoreState {
   acceptFriendRequest: (requestId: string) => Promise<void>;
   declineFriendRequest: (requestId: string) => Promise<void>;
   sendFriendRequestByPhone: (userIdOrUsername: string) => Promise<void>;
-  sendFriendRequestById: (userId: string) => Promise<void>;
+  sendFriendRequestById: (userId: string) => Promise<any>;
+  removeFriend: (friendshipId: string) => Promise<void>;
 
   // Timeline actions
   toggleLikePost: (postId: string) => void;
@@ -226,14 +228,43 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       set({ loadingConversations: true });
       const { data } = await convApi.getConversations();
       if (Array.isArray(data.conversations)) {
-        const conversations = data.conversations.map(mapBackendConversation);
-        set({ conversations });
+        const serverConvs = data.conversations.map(mapBackendConversation);
+        set((state) => {
+          const serverIds = new Set(serverConvs.map((c: Conversation) => c.id));
+          // Giữ lại các cuộc hội thoại vừa mở chưa có tin nhắn trên server
+          const pendingConvs = state.conversations.filter(
+            (c) =>
+              !serverIds.has(c.id) &&
+              (!c.lastMessageText ||
+                c.lastMessageText === 'Bắt đầu cuộc trò chuyện' ||
+                c.lastMessageText === ''),
+          );
+          return { conversations: [...serverConvs, ...pendingConvs] };
+        });
       }
     } catch (err) {
       console.warn('Lỗi fetchConversations:', err);
     } finally {
       set({ loadingConversations: false });
     }
+  },
+
+  fetchConversationById: async (id: string) => {
+    try {
+      const { data } = await convApi.getConversationById(id);
+      if (data?.conversation) {
+        const mapped = mapBackendConversation(data.conversation);
+        set((s) => ({
+          conversations: s.conversations.some((c) => c.id === id)
+            ? s.conversations.map((c) => (c.id === id ? mapped : c))
+            : [mapped, ...s.conversations],
+        }));
+        return mapped;
+      }
+    } catch (err) {
+      console.warn('Lỗi fetchConversationById:', err);
+    }
+    return null;
   },
 
   fetchFriends: async () => {
@@ -309,11 +340,17 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     })),
 
   markAsRead: (id) =>
-    set((state) => ({
-      conversations: state.conversations.map((c) =>
-        c.id === id ? { ...c, unreadCount: 0 } : c,
-      ),
-    })),
+    set((state) => {
+      const target = state.conversations.find((c) => c.id === id);
+      if (!target || target.unreadCount === 0) {
+        return state;
+      }
+      return {
+        conversations: state.conversations.map((c) =>
+          c.id === id ? { ...c, unreadCount: 0 } : c,
+        ),
+      };
+    }),
 
   toggleReadStatus: (id) =>
     set((state) => ({
@@ -324,7 +361,12 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       ),
     })),
 
-  deleteConversation: (id) =>
+  deleteConversation: async (id) => {
+    try {
+      await convApi.deleteConversation(id);
+    } catch (err) {
+      console.warn('Lỗi gọi API deleteConversation:', err);
+    }
     set((state) => {
       const nextMessages = { ...state.messagesByConversation };
       delete nextMessages[id];
@@ -332,9 +374,15 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
         conversations: state.conversations.filter((c) => c.id !== id),
         messagesByConversation: nextMessages,
       };
-    }),
+    });
+  },
 
-  clearConversationHistory: (id) =>
+  clearConversationHistory: async (id) => {
+    try {
+      await convApi.clearMessages(id);
+    } catch (err) {
+      console.warn('Lỗi gọi API clearMessages:', err);
+    }
     set((state) => ({
       messagesByConversation: {
         ...state.messagesByConversation,
@@ -345,7 +393,8 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
           ? { ...c, lastMessageText: 'Chưa có tin nhắn', unreadCount: 0 }
           : c,
       ),
-    })),
+    }));
+  },
 
   leaveGroup: (id) => {
     get().deleteConversation(id);
@@ -393,12 +442,13 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
           lastActiveText: friend.lastActiveText,
         };
         set((s) => {
-          if (!s.conversations.some((c) => c.id === convId)) {
-            return { conversations: [newConv, ...s.conversations] };
-          }
-          return s;
+          const exists = s.conversations.some((c) => c.id === convId);
+          return {
+            conversations: exists
+              ? s.conversations.map((c) => (c.id === convId ? { ...c, ...newConv } : c))
+              : [newConv, ...s.conversations],
+          };
         });
-        await get().fetchConversations();
         return convId;
       }
     } catch (err) {
@@ -585,12 +635,34 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
 
   sendFriendRequestById: async (userId: string) => {
     try {
-      await friendApi.sendFriendRequest(userId);
-      set((state) => ({
-        sentFriendPhones: [...state.sentFriendPhones, userId],
-      }));
+      const { data } = await friendApi.sendFriendRequest(userId);
+      if (data?.status === 'friend') {
+        await get().fetchFriends();
+        await get().fetchFriendRequests();
+      } else {
+        set((state) => ({
+          sentFriendPhones: state.sentFriendPhones.includes(userId)
+            ? state.sentFriendPhones
+            : [...state.sentFriendPhones, userId],
+        }));
+      }
+      return data;
     } catch (err) {
       console.warn('Lỗi sendFriendRequestById:', err);
+      throw err;
+    }
+  },
+
+  removeFriend: async (friendshipId: string) => {
+    try {
+      await friendApi.removeFriend(friendshipId);
+      set((state) => ({
+        friends: state.friends.filter(
+          (f) => f.friendshipId !== friendshipId && f.id !== friendshipId,
+        ),
+      }));
+    } catch (err) {
+      console.warn('Lỗi removeFriend:', err);
       throw err;
     }
   },

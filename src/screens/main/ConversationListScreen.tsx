@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ConversationItem from '../../components/chat/ConversationItem';
 import HeaderSearchBar from '../../components/common/HeaderSearchBar';
 import { Theme } from '../../config/theme';
@@ -22,6 +23,7 @@ type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type FilterKey = 'all' | 'unread' | 'groups';
 
 export default function ConversationListScreen() {
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavProp>();
   const {
     conversations,
@@ -85,7 +87,17 @@ export default function ConversationListScreen() {
         {
           text: 'Xóa',
           style: 'destructive',
-          onPress: () => deleteConversation(id),
+          onPress: async () => {
+            try {
+              await deleteConversation(id);
+            } catch (err: any) {
+              Alert.alert(
+                'Lỗi',
+                err?.response?.data?.message ||
+                  'Không thể xóa cuộc trò chuyện. Vui lòng thử lại.',
+              );
+            }
+          },
         },
       ],
     );
@@ -197,7 +209,10 @@ export default function ConversationListScreen() {
         onRequestClose={() => setShowAddMenu(false)}
       >
         <Pressable
-          style={styles.menuOverlay}
+          style={[
+            styles.menuOverlay,
+            { paddingTop: Math.max(insets.top, 10) + 56 },
+          ]}
           onPress={() => setShowAddMenu(false)}
         >
           <View style={styles.popoverMenu}>
@@ -220,7 +235,10 @@ export default function ConversationListScreen() {
               }}
             >
               <Text style={styles.popoverIcon}>👥</Text>
-              <Text style={styles.popoverText}>Tạo nhóm mới</Text>
+              <View style={styles.popoverCol}>
+                <Text style={styles.popoverText}>Tạo nhóm mới</Text>
+                <Text style={styles.devMiniLabel}>Đang phát triển</Text>
+              </View>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -248,7 +266,13 @@ export default function ConversationListScreen() {
           style={styles.sheetOverlay}
           onPress={() => setSelectedConv(null)}
         >
-          <Pressable style={styles.sheetCard} onPress={() => {}}>
+          <Pressable
+            style={[
+              styles.sheetCard,
+              { paddingBottom: Math.max(insets.bottom, 20) + 8 },
+            ]}
+            onPress={() => {}}
+          >
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle} numberOfLines={1}>
               {selectedConv?.name}
@@ -386,17 +410,25 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.2)',
     alignItems: 'flex-end',
-    paddingTop: 94,
     paddingRight: 14,
   },
   popoverMenu: {
-    width: 196,
+    width: 214,
     backgroundColor: Theme.colors.surface,
     borderRadius: 14,
     paddingVertical: 6,
     ...Theme.shadow.md,
     borderWidth: 1,
     borderColor: Theme.colors.border,
+  },
+  popoverCol: {
+    flex: 1,
+  },
+  devMiniLabel: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    color: '#B45309',
+    marginTop: 1,
   },
   popoverItem: {
     flexDirection: 'row',

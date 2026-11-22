@@ -1,11 +1,12 @@
 import { useEffect } from 'react';
-import { connectSocket, disconnectSocket, getSocket } from '../services/socket';
+import { connectSocket, disconnectSocket } from '../services/socket';
 import { useAuthStore } from '../store/useAuthStore';
 import { useChatStore } from '../store/useChatStore';
 
 export const useSocketEvents = () => {
   const user = useAuthStore((s) => s.user);
-  const { handleIncomingMessage, handlePresenceUpdate } = useChatStore();
+  const handleIncomingMessage = useChatStore((s) => s.handleIncomingMessage);
+  const handlePresenceUpdate = useChatStore((s) => s.handlePresenceUpdate);
 
   useEffect(() => {
     if (!user) {
@@ -14,7 +15,9 @@ export const useSocketEvents = () => {
     }
 
     const socket = connectSocket();
-    if (!socket) return;
+    if (!socket) {
+      return;
+    }
 
     // Lắng nghe tin nhắn mới từ server
     const onNewMessage = (data: { conversationId: string; message: any }) => {
@@ -24,7 +27,11 @@ export const useSocketEvents = () => {
     };
 
     // Lắng nghe cập nhật trạng thái online/offline
-    const onPresenceUpdate = (data: { userId: string; online: boolean; lastSeenAt?: string }) => {
+    const onPresenceUpdate = (data: {
+      userId: string;
+      online: boolean;
+      lastSeenAt?: string;
+    }) => {
       if (data?.userId) {
         handlePresenceUpdate(data.userId, data.online, data.lastSeenAt);
       }

@@ -41,9 +41,8 @@ export default function HeaderSearchBar({
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder}
-          placeholderTextColor="rgba(255, 255, 255, 0.85)"
+          placeholderTextColor="rgba(255, 255, 255, 0.88)"
           returnKeyType="search"
-          clearButtonMode="while-editing"
         />
         {value.length > 0 && (
           <TouchableOpacity
@@ -61,6 +60,7 @@ export default function HeaderSearchBar({
           onPress={onPressQr}
           accessibilityLabel="Quét mã QR"
           activeOpacity={0.75}
+          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
         >
           <View style={styles.qrGlyph}>
             <View style={[styles.qrCorner, styles.qrTL]} />
@@ -78,6 +78,7 @@ export default function HeaderSearchBar({
           onPress={onPressRight}
           accessibilityLabel={rightAccessibilityLabel}
           activeOpacity={0.75}
+          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
         >
           <Text style={styles.rightIconText}>{rightIcon}</Text>
         </TouchableOpacity>

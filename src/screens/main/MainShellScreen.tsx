@@ -12,7 +12,6 @@ import { Theme } from '../../config/theme';
 import { useChatStore } from '../../store/useChatStore';
 import { MainTabKey } from '../../types';
 import ConversationListScreen from './ConversationListScreen';
-import DiscoverScreen from './DiscoverScreen';
 import FriendsScreen from './FriendsScreen';
 import ProfileScreen from './ProfileScreen';
 import TimelineScreen from './TimelineScreen';
@@ -27,7 +26,6 @@ interface TabConfig {
 const TABS: TabConfig[] = [
   { key: 'messages', label: 'Tin nhắn', icon: '💬', activeIcon: '💬' },
   { key: 'contacts', label: 'Danh bạ', icon: '📒', activeIcon: '📒' },
-  { key: 'discover', label: 'Khám phá', icon: '🧭', activeIcon: '🧭' },
   { key: 'timeline', label: 'Nhật ký', icon: '🕒', activeIcon: '🕒' },
   { key: 'profile', label: 'Cá nhân', icon: '👤', activeIcon: '👤' },
 ];
@@ -35,6 +33,13 @@ const TABS: TabConfig[] = [
 export default function MainShellScreen() {
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<MainTabKey>('messages');
+  // Giữ các tab đã mở mounted để không mất vị trí cuộn & bộ lọc khi chuyển tab
+  const [mountedTabs, setMountedTabs] = useState<Record<MainTabKey, boolean>>({
+    messages: true,
+    contacts: false,
+    timeline: false,
+    profile: false,
+  });
 
   const conversations = useChatStore((s) => s.conversations);
   const friendRequestsCount = useChatStore((s) => s.friendRequests.length);
@@ -48,7 +53,14 @@ export default function MainShellScreen() {
     fetchFriendRequests();
   }, [fetchConversations, fetchFriends, fetchFriendRequests]);
 
-  // Total unread count across non-muted conversations (or all unread)
+  const handleSelectTab = (key: MainTabKey) => {
+    setActiveTab(key);
+    if (!mountedTabs[key]) {
+      setMountedTabs((prev) => ({ ...prev, [key]: true }));
+    }
+  };
+
+  // Tổng số tin nhắn chưa đọc trên các hội thoại không tắt thông báo
   const totalUnreadMessages = useMemo(
     () =>
       conversations.reduce(
@@ -68,21 +80,6 @@ export default function MainShellScreen() {
     return 0;
   };
 
-  const renderContent = () => {
-    switch (activeTab) {
-      case 'messages':
-        return <ConversationListScreen />;
-      case 'contacts':
-        return <FriendsScreen />;
-      case 'discover':
-        return <DiscoverScreen />;
-      case 'timeline':
-        return <TimelineScreen />;
-      case 'profile':
-        return <ProfileScreen />;
-    }
-  };
-
   return (
     <View style={styles.root}>
       <StatusBar
@@ -90,10 +87,51 @@ export default function MainShellScreen() {
         backgroundColor={Theme.colors.headerBg}
       />
 
-      {/* Top content viewport */}
-      <View style={styles.contentArea}>{renderContent()}</View>
+      {/* Top content viewport (preserve tab state) */}
+      <View style={styles.contentArea}>
+        {mountedTabs.messages && (
+          <View
+            style={[
+              styles.tabPane,
+              activeTab !== 'messages' && styles.tabPaneHidden,
+            ]}
+          >
+            <ConversationListScreen />
+          </View>
+        )}
+        {mountedTabs.contacts && (
+          <View
+            style={[
+              styles.tabPane,
+              activeTab !== 'contacts' && styles.tabPaneHidden,
+            ]}
+          >
+            <FriendsScreen />
+          </View>
+        )}
+        {mountedTabs.timeline && (
+          <View
+            style={[
+              styles.tabPane,
+              activeTab !== 'timeline' && styles.tabPaneHidden,
+            ]}
+          >
+            <TimelineScreen />
+          </View>
+        )}
+        {mountedTabs.profile && (
+          <View
+            style={[
+              styles.tabPane,
+              activeTab !== 'profile' && styles.tabPaneHidden,
+            ]}
+          >
+            <ProfileScreen />
+          </View>
+        )}
+      </View>
 
-      {/* 5-Tab Bottom Navigation Bar */}
+      {/* 4-Tab Bottom Navigation Bar */}
       <View
         style={[
           styles.bottomBar,
@@ -109,7 +147,10 @@ export default function MainShellScreen() {
               key={tab.key}
               style={styles.tabBtn}
               activeOpacity={0.75}
-              onPress={() => setActiveTab(tab.key)}
+              onPress={() => handleSelectTab(tab.key)}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: isActive }}
+              accessibilityLabel={tab.label}
             >
               <View
                 style={[
@@ -160,6 +201,12 @@ const styles = StyleSheet.create({
   contentArea: {
     flex: 1,
   },
+  tabPane: {
+    flex: 1,
+  },
+  tabPaneHidden: {
+    display: 'none',
+  },
   bottomBar: {
     flexDirection: 'row',
     backgroundColor: Theme.colors.surface,
@@ -176,7 +223,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   iconWrap: {
-    width: 42,
+    width: 44,
     height: 28,
     borderRadius: 14,
     justifyContent: 'center',

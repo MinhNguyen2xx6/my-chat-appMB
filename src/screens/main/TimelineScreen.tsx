@@ -3,6 +3,7 @@ import {
   Alert,
   FlatList,
   Image,
+  KeyboardAvoidingView,
   Modal,
   StyleSheet,
   Text,
@@ -10,14 +11,17 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Avatar from '../../components/common/Avatar';
 import HeaderSearchBar from '../../components/common/HeaderSearchBar';
 import { Theme } from '../../config/theme';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useChatStore } from '../../store/useChatStore';
 import { formatConversationTime } from '../../utils/formatDate';
+import { resolveMediaUrl } from '../../utils/url';
 
 export default function TimelineScreen() {
+  const insets = useSafeAreaInsets();
   const user = useAuthStore((s) => s.user);
   const { timelinePosts, friends, toggleLikePost, addTimelinePost } =
     useChatStore();
@@ -63,24 +67,48 @@ export default function TimelineScreen() {
         keyExtractor={(item) => item.id}
         ListHeaderComponent={
           <View>
+            <View style={styles.devBanner}>
+              <Text style={styles.devBannerText}>
+                🚧 Tính năng Nhật ký đang phát triển — bài đăng hiện chỉ hiển thị cục bộ trên thiết bị.
+              </Text>
+            </View>
+
             {/* Composer Box */}
             <TouchableOpacity
               style={styles.composerCard}
               activeOpacity={0.8}
               onPress={() => setComposerOpen(true)}
             >
-              <Avatar name={user?.displayName || 'Bạn'} size={42} isOnline />
+              <Avatar
+                name={user?.displayName || 'Bạn'}
+                uri={resolveMediaUrl(user?.avatarUrl)}
+                size={42}
+                isOnline
+              />
               <Text style={styles.composerPlaceholder}>
                 Hôm nay bạn thế nào?
               </Text>
-              <View style={styles.composerTag}>
+              <TouchableOpacity
+                style={styles.composerTag}
+                onPress={() =>
+                  Alert.alert(
+                    'Đang phát triển',
+                    'Tính năng đăng ảnh lên Nhật ký đang được phát triển.',
+                  )
+                }
+              >
                 <Text style={styles.composerTagText}>🖼️ Ảnh</Text>
-              </View>
+              </TouchableOpacity>
             </TouchableOpacity>
 
             {/* Stories / Khoảnh khắc */}
             <View style={styles.storiesCard}>
-              <Text style={styles.storiesTitle}>Khoảnh khắc</Text>
+              <View style={styles.storiesHeaderRow}>
+                <Text style={styles.storiesTitle}>Khoảnh khắc</Text>
+                <View style={styles.devBadge}>
+                  <Text style={styles.devBadgeText}>Đang phát triển</Text>
+                </View>
+              </View>
               <FlatList
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -91,11 +119,14 @@ export default function TimelineScreen() {
                   <TouchableOpacity
                     style={styles.storyItem}
                     onPress={() =>
-                      Alert.alert(item.name, 'Chưa có khoảnh khắc mới hôm nay.')
+                      Alert.alert(
+                        'Đang phát triển',
+                        'Tính năng Khoảnh khắc hiện đang được phát triển.',
+                      )
                     }
                   >
                     <View style={styles.storyRing}>
-                      <Avatar name={item.name} size={50} />
+                      <Avatar name={item.name} uri={item.avatarUrl} size={50} />
                     </View>
                     <Text style={styles.storyName} numberOfLines={1}>
                       {item.name.split(' ').pop()}
@@ -140,7 +171,10 @@ export default function TimelineScreen() {
               <TouchableOpacity
                 style={styles.postActionBtn}
                 onPress={() =>
-                  Alert.alert('Bình luận', `${item.commentsCount} bình luận`)
+                  Alert.alert(
+                    'Đang phát triển',
+                    'Tính năng bình luận bài viết đang được phát triển.',
+                  )
                 }
               >
                 <Text style={styles.postActionText}>
@@ -159,8 +193,13 @@ export default function TimelineScreen() {
         animationType="slide"
         onRequestClose={() => setComposerOpen(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+        <KeyboardAvoidingView behavior="height" style={styles.modalOverlay}>
+          <View
+            style={[
+              styles.modalCard,
+              { paddingBottom: Math.max(insets.bottom, 16) },
+            ]}
+          >
             <View style={styles.modalHeader}>
               <TouchableOpacity onPress={() => setComposerOpen(false)}>
                 <Text style={styles.modalCancel}>Hủy</Text>
@@ -180,7 +219,7 @@ export default function TimelineScreen() {
               onChangeText={setPostText}
             />
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -335,5 +374,34 @@ const styles = StyleSheet.create({
     color: Theme.colors.textPrimary,
     minHeight: 130,
     textAlignVertical: 'top',
+  },
+  devBanner: {
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: '#FDE68A',
+  },
+  devBannerText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: '#92400E',
+  },
+  storiesHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  devBadge: {
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  devBadgeText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    color: '#B45309',
   },
 });

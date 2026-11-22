@@ -297,16 +297,28 @@ export default function FriendsScreen() {
               />
               <View style={styles.friendInfo}>
                 <Text style={styles.friendName}>{item.name}</Text>
-                <Text style={styles.friendStatus} numberOfLines={1}>
-                  {item.bio || (item.isOnline ? 'Đang hoạt động' : item.lastActiveText)}
+                <Text
+                  style={[
+                    styles.friendStatus,
+                    item.isOnline && styles.friendStatusOnline,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {item.isOnline
+                    ? 'Đang hoạt động'
+                    : item.bio || item.lastActiveText}
                 </Text>
               </View>
 
               <TouchableOpacity
                 style={styles.callIconBtn}
                 onPress={() =>
-                  Alert.alert('Gọi thoại', `Bắt đầu cuộc gọi với ${item.name}`)
+                  Alert.alert(
+                    'Đang phát triển',
+                    'Tính năng gọi thoại hiện đang được phát triển và sẽ sớm ra mắt.',
+                  )
                 }
+                accessibilityLabel="Gọi thoại (Đang phát triển)"
               >
                 <Text style={styles.callIconText}>📞</Text>
               </TouchableOpacity>
@@ -350,14 +362,19 @@ export default function FriendsScreen() {
               >
                 <Text style={styles.featureIcon}>👥</Text>
               </View>
-              <View style={styles.featureTextCol}>
-                <Text style={styles.featureTitle}>Tạo nhóm mới</Text>
-                <Text style={styles.featureSubtitle}>
-                  Trò chuyện cùng bạn bè và đồng nghiệp
-                </Text>
-              </View>
-              <Text style={styles.chevron}>›</Text>
-            </TouchableOpacity>
+                <View style={styles.featureTextCol}>
+                  <View style={styles.titleWithBadge}>
+                    <Text style={styles.featureTitle}>Tạo nhóm mới</Text>
+                    <View style={styles.devBadge}>
+                      <Text style={styles.devBadgeText}>Đang phát triển</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.featureSubtitle}>
+                    Trò chuyện cùng bạn bè và đồng nghiệp
+                  </Text>
+                </View>
+                <Text style={styles.chevron}>›</Text>
+              </TouchableOpacity>
           }
           renderItem={({ item }) => (
             <TouchableOpacity
@@ -366,7 +383,13 @@ export default function FriendsScreen() {
                 navigation.navigate('ChatDetail', { conversationId: item.id })
               }
             >
-              <Avatar name={item.name} size={46} isGroup />
+              <Avatar
+                name={item.name}
+                uri={item.avatarUrl}
+                size={46}
+                isGroup
+                members={item.members}
+              />
               <View style={styles.friendInfo}>
                 <Text style={styles.friendName}>{item.name}</Text>
                 <Text style={styles.friendStatus}>
@@ -378,6 +401,9 @@ export default function FriendsScreen() {
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyTitle}>Chưa tham gia nhóm nào</Text>
+              <Text style={styles.emptySubtitle}>
+                Tính năng nhắn tin nhóm đang được phát triển.
+              </Text>
             </View>
           }
         />
@@ -387,10 +413,22 @@ export default function FriendsScreen() {
         <FlatList
           data={filteredOAs}
           keyExtractor={(item) => item.id}
+          ListHeaderComponent={
+            <View style={styles.devBanner}>
+              <Text style={styles.devBannerText}>
+                🚧 Official Account (OA) đang phát triển — dữ liệu minh họa.
+              </Text>
+            </View>
+          }
           renderItem={({ item }) => (
             <TouchableOpacity
               style={styles.friendRow}
-              onPress={() => Alert.alert(item.name, item.description)}
+              onPress={() =>
+                Alert.alert(
+                  'Đang phát triển',
+                  `${item.name}: ${item.description}\n\nTính năng OA đang được phát triển.`,
+                )
+              }
             >
               <View style={styles.oaAvatar}>
                 <Text style={{ fontSize: 24 }}>{item.avatarEmoji}</Text>
@@ -399,8 +437,16 @@ export default function FriendsScreen() {
                 <Text style={styles.friendName}>{item.name}</Text>
                 <Text style={styles.friendStatus}>{item.followersText}</Text>
               </View>
+              <View style={styles.devBadge}>
+                <Text style={styles.devBadgeText}>Đang phát triển</Text>
+              </View>
             </TouchableOpacity>
           )}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyTitle}>Không tìm thấy OA phù hợp</Text>
+            </View>
+          }
         />
       )}
     </View>
@@ -538,6 +584,38 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     color: Theme.colors.textSecondary,
     marginTop: 2,
+  },
+  friendStatusOnline: {
+    color: Theme.colors.success,
+    fontWeight: '600',
+  },
+  titleWithBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  devBadge: {
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  devBadgeText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    color: '#B45309',
+  },
+  devBanner: {
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: '#FDE68A',
+  },
+  devBannerText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: '#92400E',
   },
   callIconBtn: {
     padding: 8,

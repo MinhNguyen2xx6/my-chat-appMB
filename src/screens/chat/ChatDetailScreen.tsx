@@ -4,9 +4,10 @@ import {
   Alert,
   FlatList,
   Image,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  Pressable,
   StatusBar,
   StyleSheet,
   Text,
@@ -16,6 +17,7 @@ import {
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { launchImageLibrary } from 'react-native-image-picker';
 import ChatInput from '../../components/chat/ChatInput';
 import MessageBubble from '../../components/chat/MessageBubble';
 import Avatar from '../../components/common/Avatar';
@@ -23,15 +25,10 @@ import { Theme } from '../../config/theme';
 import { CURRENT_USER_ID, useChatStore } from '../../store/useChatStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import { MainStackParamList, Message } from '../../types';
+import { formatDateSeparator, isSameCalendarDay } from '../../utils/formatDate';
 
 type ChatRouteProp = RouteProp<MainStackParamList, 'ChatDetail'>;
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
-
-const SAMPLE_IMAGES = [
-  'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=600&q=80',
-  'https://images.unsplash.com/photo-1519681393784-d120267933ba?w=600&q=80',
-  'https://images.unsplash.com/photo-1557682250-33bd709cbe85?w=600&q=80',
-];
 
 const EMPTY_MESSAGES: Message[] = [];
 
@@ -48,19 +45,40 @@ export default function ChatDetailScreen() {
     (s) => s.messagesByConversation[conversationId],
   );
   const messages = rawMessages || EMPTY_MESSAGES;
+  const hasMore = useChatStore(
+    (s) => s.hasMoreMessages[conversationId] ?? false,
+  );
+  const loadingMore = useChatStore(
+    (s) => s.loadingMoreMessages[conversationId] ?? false,
+  );
   const markAsRead = useChatStore((s) => s.markAsRead);
+  const setActiveConversationId = useChatStore(
+    (s) => s.setActiveConversationId,
+  );
   const sendMessage = useChatStore((s) => s.sendMessage);
+  const retryMessage = useChatStore((s) => s.retryMessage);
   const fetchMessages = useChatStore((s) => s.fetchMessages);
+  const loadMoreMessages = useChatStore((s) => s.loadMoreMessages);
   const fetchConversationById = useChatStore((s) => s.fetchConversationById);
   const myUserId = useAuthStore((s) => s.user?._id);
 
   const listRef = useRef<FlatList<Message>>(null);
+  const isNearBottomRef = useRef(true);
+  const hasInitialScrolledRef = useRef(false);
+  const prevLastMsgIdRef = useRef<string | null>(null);
+
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [loadingConv, setLoadingConv] = useState(!conversation);
 
   useEffect(() => {
+    hasInitialScrolledRef.current = false;
+    prevLastMsgIdRef.current = null;
+    isNearBottomRef.current = true;
+
+    setActiveConversationId(conversationId);
     markAsRead(conversationId);
     fetchMessages(conversationId);
+
     const exists = useChatStore
       .getState()
       .conversations.some((c) => c.id === conversationId);
@@ -72,12 +90,47 @@ export default function ChatDetailScreen() {
     } else {
       setLoadingConv(false);
     }
-  }, [conversationId, markAsRead, fetchMessages, fetchConversationById]);
+
+    return () => {
+      setActiveConversationId(null);
+    };
+  }, [
+    conversationId,
+    setActiveConversationId,
+    markAsRead,
+    fetchMessages,
+    fetchConversationById,
+  ]);
+
+  // Chỉ tự cuộn xuống đáy khi mới mở hội thoại hoặc khi có tin mới ở cuối lúc người dùng đang ở gần đáy
+  useEffect(() => {
+    if (messages.length === 0) {
+      return;
+    }
+    const lastId = messages[messages.length - 1]?.id ?? null;
+    if (!hasInitialScrolledRef.current) {
+      hasInitialScrolledRef.current = true;
+      prevLastMsgIdRef.current = lastId;
+      setTimeout(() => {
+        listRef.current?.scrollToEnd({ animated: false });
+      }, 60);
+      return;
+    }
+
+    if (lastId !== prevLastMsgIdRef.current) {
+      prevLastMsgIdRef.current = lastId;
+      if (isNearBottomRef.current) {
+        setTimeout(() => {
+          listRef.current?.scrollToEnd({ animated: true });
+        }, 60);
+      }
+    }
+  }, [messages]);
 
   const lastOwnMessageId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       if (
-        (myUserId && messages[i].senderId === myUserId) ||
+        (myUserId && messages[i].senderId === String(myUserId)) ||
         messages[i].senderId === CURRENT_USER_ID
       ) {
         return messages[i].id;
@@ -85,6 +138,62 @@ export default function ChatDetailScreen() {
     }
     return null;
   }, [messages, myUserId]);
+
+  const handleScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    const distanceFromBottom =
+      contentSize.height - (contentOffset.y + layoutMeasurement.height);
+    isNearBottomRef.current = distanceFromBottom < 120;
+  };
+
+  const scrollToEndSoon = () => {
+    isNearBottomRef.current = true;
+    setTimeout(() => {
+      listRef.current?.scrollToEnd({ animated: true });
+    }, 80);
+  };
+
+  const showComingSoon = (featureName: string) => {
+    Alert.alert(
+      'Đang phát triển',
+      `Tính năng "${featureName}" hiện đang được phát triển và sẽ sớm ra mắt.`,
+    );
+  };
+
+  const handlePickAndSendImage = async () => {
+    try {
+      const res = await launchImageLibrary({
+        mediaType: 'photo',
+        selectionLimit: 1,
+        quality: 0.8,
+      });
+      if (res.didCancel) {
+        return;
+      }
+      if (res.errorCode) {
+        Alert.alert(
+          'Không thể chọn ảnh',
+          res.errorMessage || 'Vui lòng cấp quyền truy cập thư viện ảnh.',
+        );
+        return;
+      }
+      const asset = res.assets?.[0];
+      if (!asset?.uri) {
+        return;
+      }
+      sendMessage({
+        conversationId,
+        type: 'image',
+        content: '[Hình ảnh]',
+        imageUrl: asset.uri,
+        imageType: asset.type,
+        imageFileName: asset.fileName,
+      });
+      scrollToEndSoon();
+    } catch {
+      Alert.alert('Lỗi', 'Không thể mở thư viện ảnh.');
+    }
+  };
 
   if (!conversation) {
     if (loadingConv) {
@@ -96,7 +205,9 @@ export default function ChatDetailScreen() {
     }
     return (
       <View style={styles.missingBox}>
-        <Text style={styles.missingText}>Cuộc trò chuyện không còn tồn tại.</Text>
+        <Text style={styles.missingText}>
+          Cuộc trò chuyện không còn tồn tại.
+        </Text>
         <TouchableOpacity
           style={styles.backFallbackBtn}
           onPress={() => navigation.goBack()}
@@ -112,12 +223,6 @@ export default function ChatDetailScreen() {
     : conversation.isOnline
       ? 'Đang hoạt động'
       : conversation.lastActiveText || 'Hoạt động gần đây';
-
-  const scrollToEndSoon = () => {
-    setTimeout(() => {
-      listRef.current?.scrollToEnd({ animated: true });
-    }, 80);
-  };
 
   return (
     <View style={styles.root}>
@@ -137,6 +242,7 @@ export default function ChatDetailScreen() {
           style={styles.backBtn}
           onPress={() => navigation.goBack()}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityLabel="Quay lại"
         >
           <Text style={styles.backArrow}>←</Text>
         </TouchableOpacity>
@@ -169,24 +275,18 @@ export default function ChatDetailScreen() {
         <View style={styles.headerActions}>
           <TouchableOpacity
             style={styles.headerActionBtn}
-            onPress={() =>
-              Alert.alert(
-                'Gọi thoại',
-                `Đang bắt đầu cuộc gọi thoại với ${conversation.name}...`,
-              )
-            }
+            onPress={() => showComingSoon('Gọi thoại')}
+            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+            accessibilityLabel="Gọi thoại (Đang phát triển)"
           >
             <Text style={styles.headerActionIcon}>📞</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.headerActionBtn}
-            onPress={() =>
-              Alert.alert(
-                'Gọi video',
-                `Đang bắt đầu cuộc gọi video với ${conversation.name}...`,
-              )
-            }
+            onPress={() => showComingSoon('Gọi video')}
+            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+            accessibilityLabel="Gọi video (Đang phát triển)"
           >
             <Text style={styles.headerActionIcon}>📹</Text>
           </TouchableOpacity>
@@ -196,32 +296,45 @@ export default function ChatDetailScreen() {
             onPress={() =>
               navigation.navigate('ConversationInfo', { conversationId })
             }
+            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+            accessibilityLabel="Thông tin hội thoại"
           >
             <Text style={styles.headerActionIcon}>☰</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Body + Input */}
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={0}
-      >
+      {/* Body + Input (Android windowSoftInputMode="adjustResize" tự co layout) */}
+      <View style={styles.flex}>
         <FlatList
           ref={listRef}
           data={messages}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
-          onContentSizeChange={() =>
-            listRef.current?.scrollToEnd({ animated: false })
-          }
+          onScroll={handleScroll}
+          scrollEventThrottle={100}
+          keyboardShouldPersistTaps="handled"
           ListHeaderComponent={
-            <View style={styles.datePillWrap}>
-              <View style={styles.datePill}>
-                <Text style={styles.datePillText}>Hôm nay</Text>
+            hasMore ? (
+              <View style={styles.loadMoreWrap}>
+                <TouchableOpacity
+                  style={styles.loadMoreBtn}
+                  onPress={() => loadMoreMessages(conversationId)}
+                  disabled={loadingMore}
+                >
+                  {loadingMore ? (
+                    <ActivityIndicator
+                      size="small"
+                      color={Theme.colors.primaryDark}
+                    />
+                  ) : (
+                    <Text style={styles.loadMoreText}>
+                      ↑ Tải thêm tin nhắn cũ
+                    </Text>
+                  )}
+                </TouchableOpacity>
               </View>
-            </View>
+            ) : null
           }
           ListEmptyComponent={
             <View style={styles.emptyChat}>
@@ -240,79 +353,49 @@ export default function ChatDetailScreen() {
           }
           renderItem={({ item, index }) => {
             const prev = index > 0 ? messages[index - 1] : null;
-            const showSenderInfo = !prev || prev.senderId !== item.senderId;
+            const showDateHeader =
+              !prev || !isSameCalendarDay(prev.createdAt, item.createdAt);
+            const showSenderInfo =
+              showDateHeader || !prev || prev.senderId !== item.senderId;
+
             return (
-              <MessageBubble
-                message={item}
-                isGroup={conversation.isGroup}
-                showSenderInfo={showSenderInfo}
-                isLastOwnMessage={item.id === lastOwnMessageId}
-                onPressImage={(uri) => setPreviewImage(uri)}
-              />
+              <View>
+                {showDateHeader && (
+                  <View style={styles.datePillWrap}>
+                    <View style={styles.datePill}>
+                      <Text style={styles.datePillText}>
+                        {formatDateSeparator(item.createdAt)}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+                <MessageBubble
+                  message={item}
+                  isGroup={conversation.isGroup}
+                  showSenderInfo={showSenderInfo}
+                  isLastOwnMessage={item.id === lastOwnMessageId}
+                  onPressImage={(uri) => setPreviewImage(uri)}
+                  onRetry={(msg) => retryMessage(conversationId, msg.id)}
+                />
+              </View>
             );
           }}
         />
 
         <ChatInput
           disabled={Boolean(conversation.isBlocked)}
-          disabledText="Bạn đã chặn người dùng này. Mở chặn trong Thông tin hội thoại để nhắn tin."
+          disabledText="Bạn không thể gửi tin nhắn cho cuộc trò chuyện này."
           onSendText={(text) => {
             sendMessage({ conversationId, type: 'text', content: text });
             scrollToEndSoon();
           }}
-          onSendSticker={(emoji, label) => {
-            sendMessage({
-              conversationId,
-              type: 'sticker',
-              content: label,
-              stickerEmoji: emoji,
-              stickerLabel: label,
-            });
-            scrollToEndSoon();
-          }}
-          onSendImage={() => {
-            const img =
-              SAMPLE_IMAGES[Math.floor(Math.random() * SAMPLE_IMAGES.length)];
-            sendMessage({
-              conversationId,
-              type: 'image',
-              content: 'Hình ảnh',
-              imageUrl: img,
-            });
-            scrollToEndSoon();
-          }}
-          onSendFile={() => {
-            sendMessage({
-              conversationId,
-              type: 'file',
-              content: 'Tài liệu',
-              fileName: `BaoCao_MyChat_${new Date().getDate()}.pdf`,
-              fileSize: '2.4 MB',
-              fileExt: 'PDF',
-            });
-            scrollToEndSoon();
-          }}
-          onSendLocation={() => {
-            sendMessage({
-              conversationId,
-              type: 'location',
-              content: 'Vị trí hiện tại',
-              locationName: 'Trung tâm Quận 1',
-              locationAddress: '72 Lê Thánh Tôn, Quận 1, TP.HCM',
-            });
-            scrollToEndSoon();
-          }}
-          onSendVoice={(durationSec) => {
-            sendMessage({
-              conversationId,
-              type: 'voice',
-              content: 'Tin nhắn thoại',
-              voiceDurationSec: durationSec,
-            });
-            scrollToEndSoon();
-          }}
+          onSendSticker={() => showComingSoon('Gửi Sticker')}
+          onSendImage={handlePickAndSendImage}
+          onSendFile={() => showComingSoon('Gửi tài liệu')}
+          onSendLocation={() => showComingSoon('Chia sẻ vị trí')}
+          onSendVoice={() => showComingSoon('Ghi âm tin nhắn thoại')}
         />
-      </KeyboardAvoidingView>
+      </View>
 
       {/* Fullscreen Image Lightbox */}
       <Modal
@@ -321,9 +404,15 @@ export default function ChatDetailScreen() {
         animationType="fade"
         onRequestClose={() => setPreviewImage(null)}
       >
-        <View style={styles.lightbox}>
+        <Pressable
+          style={styles.lightbox}
+          onPress={() => setPreviewImage(null)}
+        >
           <TouchableOpacity
-            style={styles.lightboxClose}
+            style={[
+              styles.lightboxClose,
+              { top: Math.max(insets.top, 16) + 12 },
+            ]}
             onPress={() => setPreviewImage(null)}
           >
             <Text style={styles.lightboxCloseText}>✕ Đóng</Text>
@@ -335,7 +424,7 @@ export default function ChatDetailScreen() {
               resizeMode="contain"
             />
           )}
-        </View>
+        </Pressable>
       </Modal>
     </View>
   );
@@ -358,8 +447,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   backBtn: {
-    width: 34,
-    height: 34,
+    width: 36,
+    height: 36,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -383,7 +472,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   headerStatus: {
-    color: 'rgba(255,255,255,0.88)',
+    color: 'rgba(255,255,255,0.9)',
     fontSize: 12,
     marginTop: 1,
   },
@@ -393,10 +482,10 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   headerActionBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -407,9 +496,26 @@ const styles = StyleSheet.create({
   listContent: {
     paddingVertical: 12,
   },
+  loadMoreWrap: {
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  loadMoreBtn: {
+    backgroundColor: Theme.colors.surface,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: Theme.radius.pill,
+    borderWidth: 1,
+    borderColor: Theme.colors.border,
+  },
+  loadMoreText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: Theme.colors.primaryDark,
+  },
   datePillWrap: {
     alignItems: 'center',
-    marginBottom: 12,
+    marginVertical: 10,
   },
   datePill: {
     backgroundColor: 'rgba(46, 127, 217, 0.14)',
@@ -451,7 +557,7 @@ const styles = StyleSheet.create({
     color: Theme.colors.textSecondary,
   },
   backFallbackBtn: {
-    backgroundColor: Theme.colors.primary,
+    backgroundColor: Theme.colors.primaryDark,
     paddingHorizontal: 18,
     paddingVertical: 10,
     borderRadius: 12,
@@ -468,7 +574,6 @@ const styles = StyleSheet.create({
   },
   lightboxClose: {
     position: 'absolute',
-    top: 48,
     right: 20,
     zIndex: 2,
     backgroundColor: 'rgba(255,255,255,0.2)',

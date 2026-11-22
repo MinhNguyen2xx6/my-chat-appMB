@@ -1,5 +1,7 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   FlatList,
   RefreshControl,
   StyleSheet,
@@ -17,12 +19,55 @@ import { formatConversationTime } from '../../utils/formatDate';
 export default function FriendRequestsScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { friendRequests, acceptFriendRequest, declineFriendRequest, fetchFriendRequests } =
-    useChatStore();
+  const {
+    friendRequests,
+    acceptFriendRequest,
+    declineFriendRequest,
+    fetchFriendRequests,
+  } = useChatStore();
+
+  const [refreshing, setRefreshing] = useState(false);
+  const [processingIds, setProcessingIds] = useState<Record<string, boolean>>(
+    {},
+  );
 
   useEffect(() => {
     fetchFriendRequests();
   }, [fetchFriendRequests]);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await fetchFriendRequests();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleAction = async (
+    requestId: string,
+    action: 'accept' | 'decline',
+  ) => {
+    if (processingIds[requestId]) {
+      return;
+    }
+    setProcessingIds((prev) => ({ ...prev, [requestId]: true }));
+    try {
+      if (action === 'accept') {
+        await acceptFriendRequest(requestId);
+      } else {
+        await declineFriendRequest(requestId);
+      }
+    } catch (err: any) {
+      Alert.alert(
+        'Lỗi',
+        err?.response?.data?.message ||
+          'Không thể xử lý lời mời kết bạn. Vui lòng thử lại.',
+      );
+    } finally {
+      setProcessingIds((prev) => ({ ...prev, [requestId]: false }));
+    }
+  };
 
   return (
     <View style={styles.root}>
@@ -35,6 +80,8 @@ export default function FriendRequestsScreen() {
         <TouchableOpacity
           style={styles.backBtn}
           onPress={() => navigation.goBack()}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityLabel="Quay lại"
         >
           <Text style={styles.backArrow}>←</Text>
         </TouchableOpacity>
@@ -47,42 +94,58 @@ export default function FriendRequestsScreen() {
       <FlatList
         data={friendRequests}
         keyExtractor={(item) => item.id}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={[Theme.colors.primaryDark]}
+          />
+        }
         contentContainerStyle={
           friendRequests.length === 0 ? styles.emptyContainer : styles.list
         }
-        renderItem={({ item }) => (
-          <View style={styles.card}>
-            <View style={styles.topRow}>
-              <Avatar name={item.name} uri={item.avatarUrl} size={52} />
-              <View style={styles.infoCol}>
-                <Text style={styles.name}>{item.name}</Text>
-                <Text style={styles.meta}>
-                  {formatConversationTime(item.createdAt)} •{' '}
-                  {item.mutualFriends} bạn chung
-                </Text>
+        renderItem={({ item }) => {
+          const busy = Boolean(processingIds[item.id]);
+          return (
+            <View style={styles.card}>
+              <View style={styles.topRow}>
+                <Avatar name={item.name} uri={item.avatarUrl} size={52} />
+                <View style={styles.infoCol}>
+                  <Text style={styles.name}>{item.name}</Text>
+                  <Text style={styles.meta}>
+                    {formatConversationTime(item.createdAt)} •{' '}
+                    {item.mutualFriends} bạn chung
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.messageBox}>
+                <Text style={styles.messageText}>{item.message}</Text>
+              </View>
+
+              <View style={styles.btnRow}>
+                <TouchableOpacity
+                  style={[styles.declineBtn, busy && styles.btnDisabled]}
+                  disabled={busy}
+                  onPress={() => handleAction(item.id, 'decline')}
+                >
+                  <Text style={styles.declineText}>Từ chối</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.acceptBtn, busy && styles.btnDisabled]}
+                  disabled={busy}
+                  onPress={() => handleAction(item.id, 'accept')}
+                >
+                  {busy ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.acceptText}>Đồng ý</Text>
+                  )}
+                </TouchableOpacity>
               </View>
             </View>
-
-            <View style={styles.messageBox}>
-              <Text style={styles.messageText}>{item.message}</Text>
-            </View>
-
-            <View style={styles.btnRow}>
-              <TouchableOpacity
-                style={styles.declineBtn}
-                onPress={() => declineFriendRequest(item.id)}
-              >
-                <Text style={styles.declineText}>Từ chối</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.acceptBtn}
-                onPress={() => acceptFriendRequest(item.id)}
-              >
-                <Text style={styles.acceptText}>Đồng ý</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
+          );
+        }}
         ListEmptyComponent={
           <View style={styles.emptyBox}>
             <Text style={styles.emptyEmoji}>🤝</Text>
@@ -189,13 +252,16 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 10,
     borderRadius: Theme.radius.pill,
-    backgroundColor: Theme.colors.primary,
+    backgroundColor: Theme.colors.primaryDark,
     alignItems: 'center',
   },
   acceptText: {
     fontSize: 14,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  btnDisabled: {
+    opacity: 0.6,
   },
   emptyContainer: {
     flexGrow: 1,

@@ -1,5 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
+  Alert,
+  Keyboard,
   ScrollView,
   StyleSheet,
   Text,
@@ -9,7 +11,6 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme } from '../../config/theme';
-import { formatVoiceDuration } from '../../utils/formatDate';
 
 interface ChatInputProps {
   disabled?: boolean;
@@ -54,19 +55,24 @@ export default function ChatInput({
   const insets = useSafeAreaInsets();
   const [text, setText] = useState('');
   const [drawer, setDrawer] = useState<DrawerMode>('none');
-  const [emojiTab, setEmojiTab] = useState<'emoji' | 'sticker'>('sticker');
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordSeconds, setRecordSeconds] = useState(0);
+  const [emojiTab, setEmojiTab] = useState<'emoji' | 'sticker'>('emoji');
 
-  useEffect(() => {
-    if (!isRecording) {
-      return;
-    }
-    const timer = setInterval(() => {
-      setRecordSeconds((s) => s + 1);
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [isRecording]);
+  const showComingSoon = (featureName: string) => {
+    Alert.alert(
+      'Đang phát triển',
+      `Tính năng "${featureName}" hiện đang được phát triển và sẽ sớm ra mắt.`,
+    );
+  };
+
+  const toggleDrawer = (target: 'emoji' | 'attach') => {
+    setDrawer((prev) => {
+      const next = prev === target ? 'none' : target;
+      if (next !== 'none') {
+        Keyboard.dismiss();
+      }
+      return next;
+    });
+  };
 
   const handleSend = () => {
     const trimmed = text.trim();
@@ -79,20 +85,11 @@ export default function ChatInput({
 
   const handleStartRecord = () => {
     setDrawer('none');
-    setRecordSeconds(1);
-    setIsRecording(true);
-  };
-
-  const handleCancelRecord = () => {
-    setIsRecording(false);
-    setRecordSeconds(0);
-  };
-
-  const handleFinishRecord = () => {
-    const duration = Math.max(1, recordSeconds);
-    setIsRecording(false);
-    setRecordSeconds(0);
-    onSendVoice(duration);
+    if (onSendVoice) {
+      onSendVoice(0);
+    } else {
+      showComingSoon('Ghi âm tin nhắn thoại');
+    }
   };
 
   if (disabled) {
@@ -117,103 +114,65 @@ export default function ChatInput({
         { paddingBottom: Math.max(insets.bottom, 8) },
       ]}
     >
-      {isRecording ? (
-        <View style={styles.recordingBar}>
-          <TouchableOpacity
-            style={styles.cancelRecBtn}
-            onPress={handleCancelRecord}
-          >
-            <Text style={styles.cancelRecText}>Hủy</Text>
-          </TouchableOpacity>
+      <View style={styles.inputBar}>
+        <TouchableOpacity
+          style={[
+            styles.iconBtn,
+            drawer === 'emoji' && styles.iconBtnActive,
+          ]}
+          onPress={() => toggleDrawer('emoji')}
+          accessibilityLabel="Biểu tượng cảm xúc"
+        >
+          <Text style={styles.iconText}>😊</Text>
+        </TouchableOpacity>
 
-          <View style={styles.recordingCenter}>
-            <View style={styles.redDot} />
-            <Text style={styles.recordingText}>
-              Đang ghi âm {formatVoiceDuration(recordSeconds)}
-            </Text>
-          </View>
-
-          <TouchableOpacity
-            style={styles.sendRecBtn}
-            onPress={handleFinishRecord}
-          >
-            <Text style={styles.sendRecText}>Gửi ➤</Text>
-          </TouchableOpacity>
+        <View style={styles.textInputWrap}>
+          <TextInput
+            style={styles.textInput}
+            value={text}
+            onChangeText={setText}
+            onFocus={() => setDrawer('none')}
+            placeholder="Tin nhắn..."
+            placeholderTextColor={Theme.colors.textMuted}
+            multiline
+            maxLength={1000}
+          />
         </View>
-      ) : (
-        <View style={styles.inputBar}>
+
+        <TouchableOpacity
+          style={[
+            styles.iconBtn,
+            drawer === 'attach' && styles.iconBtnActive,
+          ]}
+          onPress={() => toggleDrawer('attach')}
+          accessibilityLabel="Đính kèm"
+        >
+          <Text style={styles.iconText}>📎</Text>
+        </TouchableOpacity>
+
+        {text.trim().length > 0 ? (
           <TouchableOpacity
-            style={[
-              styles.iconBtn,
-              drawer === 'emoji' && styles.iconBtnActive,
-            ]}
-            onPress={() =>
-              setDrawer((d) => (d === 'emoji' ? 'none' : 'emoji'))
-            }
+            style={styles.sendBtn}
+            onPress={handleSend}
+            accessibilityLabel="Gửi tin nhắn"
           >
-            <Text style={styles.iconText}>😊</Text>
+            <Text style={styles.sendBtnText}>➤</Text>
           </TouchableOpacity>
-
-          <View style={styles.textInputWrap}>
-            <TextInput
-              style={styles.textInput}
-              value={text}
-              onChangeText={setText}
-              onFocus={() => setDrawer('none')}
-              placeholder="Tin nhắn..."
-              placeholderTextColor={Theme.colors.textMuted}
-              multiline
-              maxLength={1000}
-            />
-          </View>
-
+        ) : (
           <TouchableOpacity
-            style={[
-              styles.iconBtn,
-              drawer === 'attach' && styles.iconBtnActive,
-            ]}
-            onPress={() =>
-              setDrawer((d) => (d === 'attach' ? 'none' : 'attach'))
-            }
+            style={styles.micBtn}
+            onPress={handleStartRecord}
+            accessibilityLabel="Ghi âm (Đang phát triển)"
           >
-            <Text style={styles.iconText}>📎</Text>
+            <Text style={styles.iconText}>🎙️</Text>
           </TouchableOpacity>
-
-          {text.trim().length > 0 ? (
-            <TouchableOpacity style={styles.sendBtn} onPress={handleSend}>
-              <Text style={styles.sendBtnText}>➤</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={styles.micBtn}
-              onPress={handleStartRecord}
-            >
-              <Text style={styles.iconText}>🎙️</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
+        )}
+      </View>
 
       {/* Emoji / Sticker Drawer */}
       {drawer === 'emoji' && (
         <View style={styles.drawer}>
           <View style={styles.drawerTabs}>
-            <TouchableOpacity
-              style={[
-                styles.drawerTab,
-                emojiTab === 'sticker' && styles.drawerTabActive,
-              ]}
-              onPress={() => setEmojiTab('sticker')}
-            >
-              <Text
-                style={[
-                  styles.drawerTabText,
-                  emojiTab === 'sticker' && styles.drawerTabTextActive,
-                ]}
-              >
-                Sticker
-              </Text>
-            </TouchableOpacity>
             <TouchableOpacity
               style={[
                 styles.drawerTab,
@@ -230,6 +189,22 @@ export default function ChatInput({
                 Emoji
               </Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.drawerTab,
+                emojiTab === 'sticker' && styles.drawerTabActive,
+              ]}
+              onPress={() => setEmojiTab('sticker')}
+            >
+              <Text
+                style={[
+                  styles.drawerTabText,
+                  emojiTab === 'sticker' && styles.drawerTabTextActive,
+                ]}
+              >
+                Sticker (Đang phát triển)
+              </Text>
+            </TouchableOpacity>
           </View>
 
           {emojiTab === 'sticker' ? (
@@ -240,10 +215,13 @@ export default function ChatInput({
               {STICKERS.map((s) => (
                 <TouchableOpacity
                   key={s.label}
-                  style={styles.stickerItem}
+                  style={[styles.stickerItem, styles.devOpacity]}
                   onPress={() => {
-                    onSendSticker(s.emoji, s.label);
-                    setDrawer('none');
+                    if (onSendSticker) {
+                      onSendSticker(s.emoji, s.label);
+                    } else {
+                      showComingSoon('Gửi Sticker');
+                    }
                   }}
                 >
                   <Text style={styles.stickerItemEmoji}>{s.emoji}</Text>
@@ -284,7 +262,7 @@ export default function ChatInput({
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.attachItem}
+            style={[styles.attachItem, styles.devOpacity]}
             onPress={() => {
               setDrawer('none');
               onSendFile();
@@ -294,10 +272,11 @@ export default function ChatInput({
               <Text style={styles.attachEmoji}>📄</Text>
             </View>
             <Text style={styles.attachLabel}>Tài liệu</Text>
+            <Text style={styles.devTag}>Đang phát triển</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.attachItem}
+            style={[styles.attachItem, styles.devOpacity]}
             onPress={() => {
               setDrawer('none');
               onSendLocation();
@@ -307,16 +286,18 @@ export default function ChatInput({
               <Text style={styles.attachEmoji}>📍</Text>
             </View>
             <Text style={styles.attachLabel}>Vị trí</Text>
+            <Text style={styles.devTag}>Đang phát triển</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.attachItem}
+            style={[styles.attachItem, styles.devOpacity]}
             onPress={handleStartRecord}
           >
             <View style={[styles.attachCircle, { backgroundColor: '#FEF3C7' }]}>
               <Text style={styles.attachEmoji}>🎙️</Text>
             </View>
             <Text style={styles.attachLabel}>Ghi âm</Text>
+            <Text style={styles.devTag}>Đang phát triển</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -543,5 +524,18 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     fontWeight: '600',
     color: Theme.colors.textPrimary,
+  },
+  devOpacity: {
+    opacity: 0.72,
+  },
+  devTag: {
+    fontSize: 9.5,
+    fontWeight: '700',
+    color: Theme.colors.warning,
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 6,
+    overflow: 'hidden',
   },
 });

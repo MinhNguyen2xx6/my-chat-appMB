@@ -1,7 +1,6 @@
 export type MainTabKey =
   | 'messages'
   | 'contacts'
-  | 'discover'
   | 'timeline'
   | 'profile';
 
@@ -13,7 +12,7 @@ export type MessageType =
   | 'voice'
   | 'location';
 
-export type MessageStatus = 'sending' | 'sent' | 'seen';
+export type MessageStatus = 'sending' | 'sent' | 'seen' | 'failed';
 
 export interface Member {
   id: string;
@@ -36,6 +35,8 @@ export interface Message {
   status: MessageStatus;
   // Optional payloads by type
   imageUrl?: string;
+  imageType?: string;
+  imageFileName?: string;
   fileName?: string;
   fileSize?: string;
   fileExt?: string;

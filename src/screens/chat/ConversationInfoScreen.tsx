@@ -39,11 +39,17 @@ export default function ConversationInfoScreen() {
     friends,
     toggleMuteConversation,
     togglePinConversation,
-    toggleBlockConversation,
     leaveGroup,
     clearConversationHistory,
     removeFriend,
   } = useChatStore();
+
+  const showComingSoon = (featureName: string) => {
+    Alert.alert(
+      'Đang phát triển',
+      `Tính năng "${featureName}" hiện đang được phát triển và sẽ sớm ra mắt.`,
+    );
+  };
 
   const matchedFriend = useMemo(() => {
     if (!conversation || conversation.isGroup) return null;
@@ -62,7 +68,19 @@ export default function ConversationInfoScreen() {
   );
 
   if (!conversation) {
-    return null;
+    return (
+      <View style={styles.missingBox}>
+        <Text style={styles.missingText}>
+          Cuộc trò chuyện không còn tồn tại.
+        </Text>
+        <TouchableOpacity
+          style={styles.backFallbackBtn}
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={styles.backFallbackText}>Quay lại</Text>
+        </TouchableOpacity>
+      </View>
+    );
   }
 
   const handleLeaveGroup = () => {
@@ -74,9 +92,16 @@ export default function ConversationInfoScreen() {
         {
           text: 'Rời nhóm',
           style: 'destructive',
-          onPress: () => {
-            leaveGroup(conversation.id);
-            navigation.popToTop();
+          onPress: async () => {
+            try {
+              await leaveGroup(conversation.id);
+              navigation.popToTop();
+            } catch (err: any) {
+              Alert.alert(
+                'Lỗi',
+                err?.response?.data?.message || 'Không thể rời nhóm lúc này.',
+              );
+            }
           },
         },
       ],
@@ -111,33 +136,30 @@ export default function ConversationInfoScreen() {
   };
 
   const handleToggleBlock = () => {
-    const nextAction = conversation.isBlocked ? 'Bỏ chặn' : 'Chặn';
-    Alert.alert(
-      `${nextAction} ${conversation.name}`,
-      conversation.isBlocked
-        ? 'Bạn sẽ có thể nhắn tin và gọi điện lại với người này.'
-        : 'Người này sẽ không thể gửi tin nhắn cho bạn nữa.',
-      [
-        { text: 'Hủy', style: 'cancel' },
-        {
-          text: nextAction,
-          style: conversation.isBlocked ? 'default' : 'destructive',
-          onPress: () => toggleBlockConversation(conversation.id),
-        },
-      ],
-    );
+    showComingSoon('Chặn người dùng');
   };
 
   const handleClearHistory = () => {
     Alert.alert(
       'Xóa lịch sử trò chuyện',
-      'Toàn bộ tin nhắn trong cuộc trò chuyện này sẽ bị xóa khỏi thiết bị.',
+      'Toàn bộ tin nhắn trong cuộc trò chuyện này sẽ bị xóa vĩnh viễn.',
       [
         { text: 'Hủy', style: 'cancel' },
         {
           text: 'Xóa',
           style: 'destructive',
-          onPress: () => clearConversationHistory(conversation.id),
+          onPress: async () => {
+            try {
+              await clearConversationHistory(conversation.id);
+              Alert.alert('Thành công', 'Đã xóa lịch sử trò chuyện.');
+            } catch (err: any) {
+              Alert.alert(
+                'Lỗi',
+                err?.response?.data?.message ||
+                  'Không thể xóa lịch sử trò chuyện. Vui lòng thử lại.',
+              );
+            }
+          },
         },
       ],
     );
@@ -191,14 +213,13 @@ export default function ConversationInfoScreen() {
           <View style={styles.quickRow}>
             <TouchableOpacity
               style={styles.quickItem}
-              onPress={() =>
-                Alert.alert('Tìm tin nhắn', 'Nhập từ khóa để tìm trong hội thoại.')
-              }
+              onPress={() => showComingSoon('Tìm tin nhắn')}
             >
               <View style={styles.quickCircle}>
                 <Text style={styles.quickIcon}>🔍</Text>
               </View>
               <Text style={styles.quickLabel}>Tìm tin nhắn</Text>
+              <Text style={styles.devPillSmall}>Đang phát triển</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -240,11 +261,8 @@ export default function ConversationInfoScreen() {
             <TouchableOpacity
               style={styles.quickItem}
               onPress={() =>
-                Alert.alert(
+                showComingSoon(
                   conversation.isGroup ? 'Thêm thành viên' : 'Trang cá nhân',
-                  conversation.isGroup
-                    ? 'Chọn bạn bè để mời vào nhóm.'
-                    : `Xem trang cá nhân của ${conversation.name}`,
                 )
               }
             >
@@ -256,6 +274,7 @@ export default function ConversationInfoScreen() {
               <Text style={styles.quickLabel}>
                 {conversation.isGroup ? 'Thêm bạn' : 'Trang cá nhân'}
               </Text>
+              <Text style={styles.devPillSmall}>Đang phát triển</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -401,11 +420,12 @@ export default function ConversationInfoScreen() {
                 onPress={handleToggleBlock}
               >
                 <Text style={styles.dangerIcon}>🚫</Text>
-                <Text style={styles.dangerText}>
-                  {conversation.isBlocked
-                    ? 'Bỏ chặn người dùng này'
-                    : 'Chặn người dùng này'}
+                <Text style={[styles.dangerText, { flex: 1 }]}>
+                  Chặn người dùng này
                 </Text>
+                <View style={styles.devBadge}>
+                  <Text style={styles.devBadgeText}>Đang phát triển</Text>
+                </View>
               </TouchableOpacity>
             </>
           )}
@@ -626,5 +646,47 @@ const styles = StyleSheet.create({
     fontSize: 14.5,
     fontWeight: '600',
     color: Theme.colors.danger,
+  },
+  devPillSmall: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: Theme.colors.warning,
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  devBadge: {
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  devBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#B45309',
+  },
+  missingBox: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: Theme.colors.background,
+    gap: 12,
+  },
+  missingText: {
+    fontSize: 15,
+    color: Theme.colors.textSecondary,
+  },
+  backFallbackBtn: {
+    backgroundColor: Theme.colors.primaryDark,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  backFallbackText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
 });

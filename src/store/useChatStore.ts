@@ -1,13 +1,13 @@
 import { create } from 'zustand';
-import { SERVER_URL } from '../config/constants';
 import * as convApi from '../services/api/conversations';
 import * as friendApi from '../services/api/friends';
 import { useAuthStore } from './useAuthStore';
+import { formatConversationTime } from '../utils/formatDate';
+import { resolveMediaUrl } from '../utils/url';
 import {
   Conversation,
   Friend,
   FriendRequest,
-  Member,
   Message,
   MessageType,
   OfficialAccount,
@@ -15,6 +15,8 @@ import {
 } from '../types';
 
 export const CURRENT_USER_ID = 'me';
+
+const PAGE_SIZE = 30;
 
 const INITIAL_OAS: OfficialAccount[] = [
   {
@@ -37,26 +39,43 @@ const INITIAL_OAS: OfficialAccount[] = [
   },
 ];
 
-const INITIAL_TIMELINE_POSTS: TimelinePost[] = [
+const createInitialTimelinePosts = (): TimelinePost[] => [
   {
     id: 'p1',
     authorId: 'u1',
     authorName: 'MyChat',
     createdAt: Date.now() - 3600000,
-    content: 'Chào mừng bạn đến với MyChat! Kết nối và nhắn tin thời gian thực với bạn bè ngay.',
+    content:
+      'Chào mừng bạn đến với MyChat! Tính năng Nhật ký đang trong quá trình phát triển và sẽ sớm đồng bộ dữ liệu trực tuyến.',
     likes: 12,
     isLiked: false,
     commentsCount: 2,
   },
 ];
 
-export const DIRECTORY_USERS: any[] = [];
+const makeTempId = () =>
+  `temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-interface SendMessagePayload {
+const formatLastSeenText = (isOnline: boolean, lastSeenAt?: string): string => {
+  if (isOnline) {
+    return 'Đang hoạt động';
+  }
+  if (lastSeenAt) {
+    const ts = new Date(lastSeenAt).getTime();
+    if (Number.isFinite(ts)) {
+      return `Hoạt động ${formatConversationTime(ts)}`;
+    }
+  }
+  return 'Hoạt động gần đây';
+};
+
+export interface SendMessagePayload {
   conversationId: string;
   type: MessageType;
   content: string;
   imageUrl?: string;
+  imageType?: string;
+  imageFileName?: string;
   fileName?: string;
   fileSize?: string;
   fileExt?: string;
@@ -75,33 +94,43 @@ interface ChatStoreState {
   officialAccounts: OfficialAccount[];
   timelinePosts: TimelinePost[];
   sentFriendPhones: string[];
+  activeConversationId: string | null;
   loadingConversations: boolean;
   loadingFriends: boolean;
   loadingMessages: Record<string, boolean>;
+  loadingMoreMessages: Record<string, boolean>;
+  hasMoreMessages: Record<string, boolean>;
+  nextCursorByConversation: Record<string, string | undefined>;
 
   // Data fetching
   fetchConversations: () => Promise<void>;
   fetchFriends: () => Promise<void>;
   fetchFriendRequests: () => Promise<void>;
   fetchMessages: (convId: string) => Promise<void>;
+  loadMoreMessages: (convId: string) => Promise<void>;
   fetchConversationById: (id: string) => Promise<Conversation | null>;
 
   // Conversation actions
+  setActiveConversationId: (id: string | null) => void;
   togglePinConversation: (id: string) => void;
   toggleMuteConversation: (id: string) => void;
   markAsRead: (id: string) => void;
   toggleReadStatus: (id: string) => void;
   deleteConversation: (id: string) => Promise<void>;
   clearConversationHistory: (id: string) => Promise<void>;
-  leaveGroup: (id: string) => void;
+  leaveGroup: (id: string) => Promise<void>;
   toggleBlockConversation: (id: string) => void;
-  createGroup: (name: string, memberIds: string[]) => string;
   getOrCreateDirectConversation: (friend: Friend) => Promise<string>;
 
   // Messaging actions
   sendMessage: (payload: SendMessagePayload) => Promise<void>;
+  retryMessage: (conversationId: string, messageId: string) => Promise<void>;
   handleIncomingMessage: (conversationId: string, backendMsg: any) => void;
-  handlePresenceUpdate: (userId: string, isOnline: boolean, lastSeenAt?: string) => void;
+  handlePresenceUpdate: (
+    userId: string,
+    isOnline: boolean,
+    lastSeenAt?: string,
+  ) => void;
 
   // Friends actions
   acceptFriendRequest: (requestId: string) => Promise<void>;
@@ -110,7 +139,7 @@ interface ChatStoreState {
   sendFriendRequestById: (userId: string) => Promise<any>;
   removeFriend: (friendshipId: string) => Promise<void>;
 
-  // Timeline actions
+  // Timeline actions (local preview - đang phát triển)
   toggleLikePost: (postId: string) => void;
   addTimelinePost: (content: string, authorName: string) => void;
 
@@ -118,18 +147,23 @@ interface ChatStoreState {
   reset: () => void;
 }
 
-const mapBackendConversation = (c: any): Conversation => {
+const mapBackendConversation = (
+  c: any,
+  existing?: Conversation,
+): Conversation => {
   const p = c.participant || {};
   const convId = String(c._id);
-  const avatarUrl = p.avatarUrl
-    ? (p.avatarUrl.startsWith('http') ? p.avatarUrl : `${SERVER_URL}${p.avatarUrl}`)
-    : undefined;
-
+  const avatarUrl = resolveMediaUrl(p.avatarUrl);
   const isOnline = Boolean(p.online);
+  const lastActiveText = formatLastSeenText(isOnline, p.lastSeenAt);
+
+  const serverUnread =
+    typeof c.unreadCount === 'number' ? c.unreadCount : undefined;
+
   return {
     id: convId,
     name: p.displayName || p.username || 'Người dùng MyChat',
-    isGroup: false,
+    isGroup: Boolean(c.isGroup),
     avatarUrl,
     members: [
       {
@@ -137,38 +171,44 @@ const mapBackendConversation = (c: any): Conversation => {
         name: p.displayName || p.username || 'Người dùng',
         avatarUrl,
         isOnline,
-        lastActiveText: isOnline ? 'Đang hoạt động' : 'Hoạt động gần đây',
+        lastActiveText,
       },
     ],
     lastMessageText:
       c.lastMessage?.text ||
-      (c.lastMessage?.type === 'image' ? '[Hình ảnh]' : 'Bắt đầu cuộc trò chuyện'),
-    lastMessageSender: c.lastMessage?.sender,
+      (c.lastMessage?.type === 'image'
+        ? '[Hình ảnh]'
+        : existing?.lastMessageText || 'Bắt đầu cuộc trò chuyện'),
+    lastMessageSender: c.lastMessage?.sender ?? existing?.lastMessageSender,
     lastMessageTime: c.lastMessage?.createdAt
       ? new Date(c.lastMessage.createdAt).getTime()
-      : (c.updatedAt ? new Date(c.updatedAt).getTime() : Date.now()),
-    unreadCount: 0,
-    isPinned: false,
-    isMuted: false,
+      : c.updatedAt
+        ? new Date(c.updatedAt).getTime()
+        : existing?.lastMessageTime ?? Date.now(),
+    unreadCount: serverUnread ?? existing?.unreadCount ?? 0,
+    isPinned: existing?.isPinned ?? false,
+    isMuted: existing?.isMuted ?? false,
+    isBlocked: existing?.isBlocked,
     isOnline,
-    lastActiveText: isOnline ? 'Đang hoạt động' : 'Hoạt động gần đây',
+    lastActiveText,
   };
 };
 
 const mapBackendMessage = (m: any, currentUserId?: string): Message => {
   const senderId = String(m.sender?._id || m.sender);
   const isMe = currentUserId ? senderId === String(currentUserId) : false;
-  const imageUrl = m.imageUrl
-    ? (m.imageUrl.startsWith('http') ? m.imageUrl : `${SERVER_URL}${m.imageUrl}`)
-    : undefined;
+  const imageUrl = resolveMediaUrl(m.imageUrl);
+  const senderName = isMe
+    ? 'Bạn'
+    : m.sender?.displayName || m.sender?.username || '';
 
   return {
     id: String(m._id),
     conversationId: String(m.conversation),
     senderId,
-    senderName: isMe ? 'Bạn' : '',
+    senderName,
     type: m.type === 'image' ? 'image' : 'text',
-    content: m.text || (m.type === 'image' ? 'Hình ảnh' : ''),
+    content: m.text || (m.type === 'image' ? '[Hình ảnh]' : ''),
     imageUrl,
     createdAt: m.createdAt ? new Date(m.createdAt).getTime() : Date.now(),
     status: 'seen',
@@ -177,9 +217,8 @@ const mapBackendMessage = (m: any, currentUserId?: string): Message => {
 
 const mapBackendFriend = (f: any): Friend => {
   const u = f.user || {};
-  const avatarUrl = u.avatarUrl
-    ? (u.avatarUrl.startsWith('http') ? u.avatarUrl : `${SERVER_URL}${u.avatarUrl}`)
-    : undefined;
+  const avatarUrl = resolveMediaUrl(u.avatarUrl);
+  const isOnline = Boolean(u.online);
 
   return {
     id: String(u._id),
@@ -187,17 +226,15 @@ const mapBackendFriend = (f: any): Friend => {
     name: u.displayName || u.username || 'Bạn bè',
     phone: u.username || '',
     avatarUrl,
-    isOnline: false,
-    lastActiveText: 'Hoạt động gần đây',
-    bio: `@${u.username}`,
+    isOnline,
+    lastActiveText: formatLastSeenText(isOnline, u.lastSeenAt),
+    bio: u.username ? `@${u.username}` : undefined,
   };
 };
 
 const mapBackendRequest = (r: any): FriendRequest => {
   const u = r.user || {};
-  const avatarUrl = u.avatarUrl
-    ? (u.avatarUrl.startsWith('http') ? u.avatarUrl : `${SERVER_URL}${u.avatarUrl}`)
-    : undefined;
+  const avatarUrl = resolveMediaUrl(u.avatarUrl);
 
   return {
     id: String(r._id),
@@ -217,20 +254,31 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   friends: [],
   friendRequests: [],
   officialAccounts: INITIAL_OAS,
-  timelinePosts: INITIAL_TIMELINE_POSTS,
+  timelinePosts: createInitialTimelinePosts(),
   sentFriendPhones: [],
+  activeConversationId: null,
   loadingConversations: false,
   loadingFriends: false,
   loadingMessages: {},
+  loadingMoreMessages: {},
+  hasMoreMessages: {},
+  nextCursorByConversation: {},
+
+  setActiveConversationId: (id) => set({ activeConversationId: id }),
 
   fetchConversations: async () => {
     try {
       set({ loadingConversations: true });
       const { data } = await convApi.getConversations();
       if (Array.isArray(data.conversations)) {
-        const serverConvs = data.conversations.map(mapBackendConversation);
         set((state) => {
-          const serverIds = new Set(serverConvs.map((c: Conversation) => c.id));
+          const existingMap = new Map(
+            state.conversations.map((c) => [c.id, c]),
+          );
+          const serverConvs: Conversation[] = data.conversations.map((c: any) =>
+            mapBackendConversation(c, existingMap.get(String(c._id))),
+          );
+          const serverIds = new Set(serverConvs.map((c) => c.id));
           // Giữ lại các cuộc hội thoại vừa mở chưa có tin nhắn trên server
           const pendingConvs = state.conversations.filter(
             (c) =>
@@ -243,7 +291,9 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
         });
       }
     } catch (err) {
-      console.warn('Lỗi fetchConversations:', err);
+      if (__DEV__) {
+        console.warn('Lỗi fetchConversations:', err);
+      }
     } finally {
       set({ loadingConversations: false });
     }
@@ -253,7 +303,8 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     try {
       const { data } = await convApi.getConversationById(id);
       if (data?.conversation) {
-        const mapped = mapBackendConversation(data.conversation);
+        const existing = get().conversations.find((c) => c.id === id);
+        const mapped = mapBackendConversation(data.conversation, existing);
         set((s) => ({
           conversations: s.conversations.some((c) => c.id === id)
             ? s.conversations.map((c) => (c.id === id ? mapped : c))
@@ -262,7 +313,9 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
         return mapped;
       }
     } catch (err) {
-      console.warn('Lỗi fetchConversationById:', err);
+      if (__DEV__) {
+        console.warn('Lỗi fetchConversationById:', err);
+      }
     }
     return null;
   },
@@ -276,7 +329,9 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
         set({ friends });
       }
     } catch (err) {
-      console.warn('Lỗi fetchFriends:', err);
+      if (__DEV__) {
+        console.warn('Lỗi fetchFriends:', err);
+      }
     } finally {
       set({ loadingFriends: false });
     }
@@ -290,7 +345,9 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
         set({ friendRequests });
       }
     } catch (err) {
-      console.warn('Lỗi fetchFriendRequests:', err);
+      if (__DEV__) {
+        console.warn('Lỗi fetchFriendRequests:', err);
+      }
     }
   },
 
@@ -299,28 +356,127 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       set((s) => ({
         loadingMessages: { ...s.loadingMessages, [convId]: true },
       }));
-      const { data } = await convApi.getMessages(convId);
+      const { data } = await convApi.getMessages(convId, undefined, PAGE_SIZE);
       if (Array.isArray(data.messages)) {
         const myId = useAuthStore.getState().user?._id;
         // Backend trả về mảng sắp xếp mới nhất trước (desc), đảo lại để hiển thị từ cũ đến mới
         const rawMsgs = [...data.messages].reverse();
         const mapped = rawMsgs.map((m) => mapBackendMessage(m, myId));
-        // Lọc trùng ID
         const uniqueMessages = Array.from(
           new Map(mapped.map((m) => [m.id, m])).values(),
         );
-        set((s) => ({
-          messagesByConversation: {
-            ...s.messagesByConversation,
-            [convId]: uniqueMessages,
-          },
-        }));
+        const hasMore =
+          typeof data.hasMore === 'boolean'
+            ? data.hasMore
+            : data.messages.length >= PAGE_SIZE;
+        const nextCursor =
+          data.nextCursor ??
+          (rawMsgs[0]?._id ? String(rawMsgs[0]._id) : undefined);
+
+        set((s) => {
+          // Giữ lại các tin nhắn tạm đang gửi lỗi (failed) để người dùng có thể bấm thử lại
+          const failedLocal = (s.messagesByConversation[convId] ?? []).filter(
+            (m) => m.status === 'failed',
+          );
+          return {
+            messagesByConversation: {
+              ...s.messagesByConversation,
+              [convId]: [...uniqueMessages, ...failedLocal],
+            },
+            hasMoreMessages: {
+              ...s.hasMoreMessages,
+              [convId]: hasMore,
+            },
+            nextCursorByConversation: {
+              ...s.nextCursorByConversation,
+              [convId]: nextCursor,
+            },
+          };
+        });
       }
     } catch (err) {
-      console.warn('Lỗi fetchMessages:', err);
+      if (__DEV__) {
+        console.warn('Lỗi fetchMessages:', err);
+      }
     } finally {
       set((s) => ({
         loadingMessages: { ...s.loadingMessages, [convId]: false },
+      }));
+    }
+  },
+
+  loadMoreMessages: async (convId: string) => {
+    const state = get();
+    if (
+      state.loadingMoreMessages[convId] ||
+      state.loadingMessages[convId] ||
+      state.hasMoreMessages[convId] === false
+    ) {
+      return;
+    }
+
+    const currentList = state.messagesByConversation[convId] ?? [];
+    const oldestRealMsg = currentList.find((m) => !m.id.startsWith('temp_'));
+    const cursor = state.nextCursorByConversation[convId] ?? oldestRealMsg?.id;
+    if (!cursor) {
+      set((s) => ({
+        hasMoreMessages: { ...s.hasMoreMessages, [convId]: false },
+      }));
+      return;
+    }
+
+    try {
+      set((s) => ({
+        loadingMoreMessages: { ...s.loadingMoreMessages, [convId]: true },
+      }));
+      const { data } = await convApi.getMessages(convId, cursor, PAGE_SIZE);
+      if (Array.isArray(data.messages)) {
+        const myId = useAuthStore.getState().user?._id;
+        const rawMsgs = [...data.messages].reverse();
+        const olderMapped = rawMsgs.map((m) => mapBackendMessage(m, myId));
+        const hasMore =
+          typeof data.hasMore === 'boolean'
+            ? data.hasMore
+            : data.messages.length >= PAGE_SIZE;
+        const nextCursor =
+          data.nextCursor ??
+          (rawMsgs[0]?._id ? String(rawMsgs[0]._id) : undefined);
+
+        set((s) => {
+          const existing = s.messagesByConversation[convId] ?? [];
+          const mergedMap = new Map<string, Message>();
+          for (const m of olderMapped) {
+            mergedMap.set(m.id, m);
+          }
+          for (const m of existing) {
+            mergedMap.set(m.id, m);
+          }
+          return {
+            messagesByConversation: {
+              ...s.messagesByConversation,
+              [convId]: Array.from(mergedMap.values()),
+            },
+            hasMoreMessages: {
+              ...s.hasMoreMessages,
+              [convId]: hasMore && olderMapped.length > 0,
+            },
+            nextCursorByConversation: {
+              ...s.nextCursorByConversation,
+              [convId]: nextCursor,
+            },
+          };
+        });
+      }
+    } catch (err) {
+      if (__DEV__) {
+        console.warn('Lỗi loadMoreMessages:', err);
+      }
+      set((s) => ({
+        hasMoreMessages: { ...s.hasMoreMessages, [convId]: false },
+      }));
+    } finally {
+      set((s) => ({
+        loadingMoreMessages: { ...s.loadingMoreMessages, [convId]: false },
       }));
     }
   },
@@ -362,11 +518,8 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     })),
 
   deleteConversation: async (id) => {
-    try {
-      await convApi.deleteConversation(id);
-    } catch (err) {
-      console.warn('Lỗi gọi API deleteConversation:', err);
-    }
+    // Chỉ xóa ở UI sau khi API xóa thành công trên server
+    await convApi.deleteConversation(id);
     set((state) => {
       const nextMessages = { ...state.messagesByConversation };
       delete nextMessages[id];
@@ -378,15 +531,16 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   },
 
   clearConversationHistory: async (id) => {
-    try {
-      await convApi.clearMessages(id);
-    } catch (err) {
-      console.warn('Lỗi gọi API clearMessages:', err);
-    }
+    // Chỉ xóa lịch sử ở UI sau khi API xóa thành công trên server
+    await convApi.clearMessages(id);
     set((state) => ({
       messagesByConversation: {
         ...state.messagesByConversation,
         [id]: [],
+      },
+      hasMoreMessages: {
+        ...state.hasMoreMessages,
+        [id]: false,
       },
       conversations: state.conversations.map((c) =>
         c.id === id
@@ -396,8 +550,8 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     }));
   },
 
-  leaveGroup: (id) => {
-    get().deleteConversation(id);
+  leaveGroup: async (id) => {
+    await get().deleteConversation(id);
   },
 
   toggleBlockConversation: (id) =>
@@ -407,11 +561,6 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       ),
     })),
 
-  createGroup: (name, memberIds) => {
-    const id = `g_${Date.now()}`;
-    return id;
-  },
-
   getOrCreateDirectConversation: async (friend) => {
     try {
       const { data } = await convApi.openConversation(friend.id);
@@ -419,48 +568,96 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       if (conv?._id) {
         const convId = String(conv._id);
         const p = conv.participant || {};
-        const newConv: Conversation = {
-          id: convId,
-          name: p.displayName || p.username || friend.name,
-          isGroup: false,
-          avatarUrl: friend.avatarUrl,
-          members: [
-            {
-              id: friend.id,
-              name: p.displayName || p.username || friend.name,
-              avatarUrl: friend.avatarUrl,
-              isOnline: friend.isOnline,
-              lastActiveText: friend.lastActiveText,
-            },
-          ],
-          lastMessageText: '',
-          lastMessageTime: Date.now(),
-          unreadCount: 0,
-          isPinned: false,
-          isMuted: false,
-          isOnline: friend.isOnline,
-          lastActiveText: friend.lastActiveText,
-        };
+        const participantAvatar =
+          resolveMediaUrl(p.avatarUrl) ?? friend.avatarUrl;
+        const participantOnline =
+          typeof p.online === 'boolean' ? p.online : friend.isOnline;
+        const participantLastActive = formatLastSeenText(
+          participantOnline,
+          p.lastSeenAt,
+        );
+        const participantName = p.displayName || p.username || friend.name;
+
         set((s) => {
-          const exists = s.conversations.some((c) => c.id === convId);
+          const existing = s.conversations.find((c) => c.id === convId);
+          if (existing) {
+            // Không ghi đè lastMessageText / unreadCount / isPinned / isMuted của hội thoại đã có
+            return {
+              conversations: s.conversations.map((c) =>
+                c.id === convId
+                  ? {
+                      ...c,
+                      name: participantName,
+                      avatarUrl: participantAvatar,
+                      isOnline: participantOnline,
+                      lastActiveText: participantLastActive,
+                      members: [
+                        {
+                          id: friend.id,
+                          name: participantName,
+                          avatarUrl: participantAvatar,
+                          isOnline: participantOnline,
+                          lastActiveText: participantLastActive,
+                        },
+                      ],
+                    }
+                  : c,
+              ),
+            };
+          }
+
+          const newConv: Conversation = {
+            id: convId,
+            name: participantName,
+            isGroup: false,
+            avatarUrl: participantAvatar,
+            members: [
+              {
+                id: friend.id,
+                name: participantName,
+                avatarUrl: participantAvatar,
+                isOnline: participantOnline,
+                lastActiveText: participantLastActive,
+              },
+            ],
+            lastMessageText:
+              conv.lastMessage?.text ||
+              (conv.lastMessage?.type === 'image' ? '[Hình ảnh]' : ''),
+            lastMessageSender: conv.lastMessage?.sender,
+            lastMessageTime: conv.lastMessage?.createdAt
+              ? new Date(conv.lastMessage.createdAt).getTime()
+              : Date.now(),
+            unreadCount: 0,
+            isPinned: false,
+            isMuted: false,
+            isOnline: participantOnline,
+            lastActiveText: participantLastActive,
+          };
+
           return {
-            conversations: exists
-              ? s.conversations.map((c) => (c.id === convId ? { ...c, ...newConv } : c))
-              : [newConv, ...s.conversations],
+            conversations: [newConv, ...s.conversations],
           };
         });
         return convId;
       }
     } catch (err) {
-      console.warn('Lỗi getOrCreateDirectConversation:', err);
+      if (__DEV__) {
+        console.warn('Lỗi getOrCreateDirectConversation:', err);
+      }
     }
     return '';
   },
 
   sendMessage: async (payload) => {
+    if (payload.type !== 'text' && payload.type !== 'image') {
+      return;
+    }
+
     const myId = useAuthStore.getState().user?._id || CURRENT_USER_ID;
-    const tempId = `temp_${Date.now()}`;
+    const tempId = makeTempId();
     const now = Date.now();
+    const previewText =
+      payload.type === 'image' ? '[Hình ảnh]' : payload.content;
 
     const optimisticMsg: Message = {
       id: tempId,
@@ -468,14 +665,29 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       senderId: myId,
       senderName: 'Bạn',
       type: payload.type,
-      content: payload.content,
+      content: previewText,
       createdAt: now,
       status: 'sending',
       imageUrl: payload.imageUrl,
+      imageType: payload.imageType,
+      imageFileName: payload.imageFileName,
+      fileName: payload.fileName,
+      fileSize: payload.fileSize,
+      fileExt: payload.fileExt,
+      stickerEmoji: payload.stickerEmoji,
+      stickerLabel: payload.stickerLabel,
+      voiceDurationSec: payload.voiceDurationSec,
+      locationName: payload.locationName,
+      locationAddress: payload.locationAddress,
     };
 
+    const prevConv = get().conversations.find(
+      (c) => c.id === payload.conversationId,
+    );
+
     set((state) => {
-      const prevMsgs = state.messagesByConversation[payload.conversationId] ?? [];
+      const prevMsgs =
+        state.messagesByConversation[payload.conversationId] ?? [];
       return {
         messagesByConversation: {
           ...state.messagesByConversation,
@@ -485,7 +697,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
           c.id === payload.conversationId
             ? {
                 ...c,
-                lastMessageText: payload.content || (payload.type === 'image' ? '[Hình ảnh]' : ''),
+                lastMessageText: previewText,
                 lastMessageSender: 'Bạn',
                 lastMessageTime: now,
                 unreadCount: 0,
@@ -496,14 +708,33 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     });
 
     try {
-      const { data } = await convApi.sendTextMessage(
-        payload.conversationId,
-        payload.content,
-      );
+      let data: any;
+      if (payload.type === 'image' && payload.imageUrl) {
+        const formData = new FormData();
+        formData.append('image', {
+          uri: payload.imageUrl,
+          type: payload.imageType || 'image/jpeg',
+          name: payload.imageFileName || `img_${Date.now()}.jpg`,
+        } as any);
+        const res = await convApi.sendImageMessage(
+          payload.conversationId,
+          formData,
+        );
+        data = res.data;
+      } else {
+        const res = await convApi.sendTextMessage(
+          payload.conversationId,
+          payload.content,
+        );
+        data = res.data;
+      }
+
       if (data?.message?._id) {
         const realId = String(data.message._id);
+        const serverImageUrl = resolveMediaUrl(data.message.imageUrl);
         set((state) => {
-          const list = state.messagesByConversation[payload.conversationId] ?? [];
+          const list =
+            state.messagesByConversation[payload.conversationId] ?? [];
           const alreadyHasReal = list.some((m) => m.id === realId);
           return {
             messagesByConversation: {
@@ -511,24 +742,83 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
               [payload.conversationId]: alreadyHasReal
                 ? list.filter((m) => m.id !== tempId)
                 : list.map((m) =>
-                    m.id === tempId ? { ...m, id: realId, status: 'sent' } : m,
+                    m.id === tempId
+                      ? {
+                          ...m,
+                          id: realId,
+                          imageUrl: serverImageUrl ?? m.imageUrl,
+                          status: 'sent',
+                        }
+                      : m,
                   ),
             },
           };
         });
       }
     } catch (err) {
-      console.warn('Lỗi gửi tin nhắn:', err);
+      if (__DEV__) {
+        console.warn('Lỗi gửi tin nhắn:', err);
+      }
+      // Đánh dấu thất bại để người dùng thấy rõ và có thể bấm gửi lại
+      set((state) => ({
+        messagesByConversation: {
+          ...state.messagesByConversation,
+          [payload.conversationId]: (
+            state.messagesByConversation[payload.conversationId] ?? []
+          ).map((m) => (m.id === tempId ? { ...m, status: 'failed' } : m)),
+        },
+        conversations: prevConv
+          ? state.conversations.map((c) =>
+              c.id === payload.conversationId
+                ? {
+                    ...c,
+                    lastMessageText: prevConv.lastMessageText,
+                    lastMessageSender: prevConv.lastMessageSender,
+                    lastMessageTime: prevConv.lastMessageTime,
+                  }
+                : c,
+            )
+          : state.conversations,
+      }));
     }
+  },
+
+  retryMessage: async (conversationId, messageId) => {
+    const list = get().messagesByConversation[conversationId] ?? [];
+    const target = list.find(
+      (m) => m.id === messageId && m.status === 'failed',
+    );
+    if (!target) {
+      return;
+    }
+
+    // Xóa tin nhắn lỗi cũ trước khi gửi lại
+    set((state) => ({
+      messagesByConversation: {
+        ...state.messagesByConversation,
+        [conversationId]: (
+          state.messagesByConversation[conversationId] ?? []
+        ).filter((m) => m.id !== messageId),
+      },
+    }));
+
+    await get().sendMessage({
+      conversationId,
+      type: target.type,
+      content: target.content,
+      imageUrl: target.imageUrl,
+      imageType: target.imageType,
+      imageFileName: target.imageFileName,
+    });
   },
 
   handleIncomingMessage: (conversationId: string, backendMsg: any) => {
     const myId = useAuthStore.getState().user?._id;
     const msg = mapBackendMessage(backendMsg, myId);
+    const isFromMe = Boolean(myId && msg.senderId === String(myId));
 
     set((state) => {
       const list = state.messagesByConversation[conversationId] ?? [];
-      // Tránh trùng tin nhắn nếu đã có ID này
       if (list.some((m) => m.id === msg.id)) {
         return state;
       }
@@ -537,28 +827,38 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       const tempIndex = list.findIndex(
         (m) =>
           m.id.startsWith('temp_') &&
+          m.status === 'sending' &&
           m.senderId === msg.senderId &&
-          m.content === msg.content,
+          m.type === msg.type &&
+          (m.type === 'image' || m.content === msg.content),
       );
 
       let nextList: Message[];
       if (tempIndex !== -1) {
         nextList = [...list];
-        nextList[tempIndex] = msg;
+        nextList[tempIndex] = { ...msg, status: 'sent' };
       } else {
         nextList = [...list, msg];
       }
 
-      // Cập nhật hoặc bổ sung conversation
-      const convExists = state.conversations.some((c) => c.id === conversationId);
+      const isCurrentlyViewing = state.activeConversationId === conversationId;
+      const shouldIncrementUnread = !isFromMe && !isCurrentlyViewing;
+
+      const convExists = state.conversations.some(
+        (c) => c.id === conversationId,
+      );
       const updatedConversations = convExists
         ? state.conversations.map((c) =>
             c.id === conversationId
               ? {
                   ...c,
-                  lastMessageText: msg.content || (msg.type === 'image' ? '[Hình ảnh]' : ''),
+                  lastMessageText:
+                    msg.type === 'image' ? '[Hình ảnh]' : msg.content,
                   lastMessageTime: msg.createdAt,
                   lastMessageSender: msg.senderName,
+                  unreadCount: shouldIncrementUnread
+                    ? c.unreadCount + 1
+                    : c.unreadCount,
                 }
               : c,
           )
@@ -578,14 +878,19 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     }
   },
 
-  handlePresenceUpdate: (userId: string, isOnline: boolean, lastSeenAt?: string) => {
+  handlePresenceUpdate: (
+    userId: string,
+    isOnline: boolean,
+    lastSeenAt?: string,
+  ) => {
+    const lastActiveText = formatLastSeenText(isOnline, lastSeenAt);
     set((state) => ({
       friends: state.friends.map((f) =>
         f.id === userId
           ? {
               ...f,
               isOnline,
-              lastActiveText: isOnline ? 'Đang hoạt động' : 'Hoạt động gần đây',
+              lastActiveText,
             }
           : f,
       ),
@@ -594,9 +899,9 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
           return {
             ...c,
             isOnline,
-            lastActiveText: isOnline ? 'Đang hoạt động' : 'Hoạt động gần đây',
+            lastActiveText,
             members: c.members.map((m) =>
-              m.id === userId ? { ...m, isOnline } : m,
+              m.id === userId ? { ...m, isOnline, lastActiveText } : m,
             ),
           };
         }
@@ -606,27 +911,19 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   },
 
   acceptFriendRequest: async (requestId: string) => {
-    try {
-      await friendApi.acceptFriendRequest(requestId);
-      set((state) => ({
-        friendRequests: state.friendRequests.filter((r) => r.id !== requestId),
-      }));
-      await get().fetchFriends();
-      await get().fetchConversations();
-    } catch (err) {
-      console.warn('Lỗi acceptFriendRequest:', err);
-    }
+    await friendApi.acceptFriendRequest(requestId);
+    set((state) => ({
+      friendRequests: state.friendRequests.filter((r) => r.id !== requestId),
+    }));
+    await get().fetchFriends();
+    await get().fetchConversations();
   },
 
   declineFriendRequest: async (requestId: string) => {
-    try {
-      await friendApi.declineFriendRequest(requestId);
-      set((state) => ({
-        friendRequests: state.friendRequests.filter((r) => r.id !== requestId),
-      }));
-    } catch (err) {
-      console.warn('Lỗi declineFriendRequest:', err);
-    }
+    await friendApi.declineFriendRequest(requestId);
+    set((state) => ({
+      friendRequests: state.friendRequests.filter((r) => r.id !== requestId),
+    }));
   },
 
   sendFriendRequestByPhone: async (userIdOrUsername: string) => {
@@ -634,37 +931,27 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
   },
 
   sendFriendRequestById: async (userId: string) => {
-    try {
-      const { data } = await friendApi.sendFriendRequest(userId);
-      if (data?.status === 'friend') {
-        await get().fetchFriends();
-        await get().fetchFriendRequests();
-      } else {
-        set((state) => ({
-          sentFriendPhones: state.sentFriendPhones.includes(userId)
-            ? state.sentFriendPhones
-            : [...state.sentFriendPhones, userId],
-        }));
-      }
-      return data;
-    } catch (err) {
-      console.warn('Lỗi sendFriendRequestById:', err);
-      throw err;
+    const { data } = await friendApi.sendFriendRequest(userId);
+    if (data?.status === 'friend') {
+      await get().fetchFriends();
+      await get().fetchFriendRequests();
+    } else {
+      set((state) => ({
+        sentFriendPhones: state.sentFriendPhones.includes(userId)
+          ? state.sentFriendPhones
+          : [...state.sentFriendPhones, userId],
+      }));
     }
+    return data;
   },
 
   removeFriend: async (friendshipId: string) => {
-    try {
-      await friendApi.removeFriend(friendshipId);
-      set((state) => ({
-        friends: state.friends.filter(
-          (f) => f.friendshipId !== friendshipId && f.id !== friendshipId,
-        ),
-      }));
-    } catch (err) {
-      console.warn('Lỗi removeFriend:', err);
-      throw err;
-    }
+    await friendApi.removeFriend(friendshipId);
+    set((state) => ({
+      friends: state.friends.filter(
+        (f) => f.friendshipId !== friendshipId && f.id !== friendshipId,
+      ),
+    }));
   },
 
   toggleLikePost: (postId) =>
@@ -703,7 +990,14 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       messagesByConversation: {},
       friends: [],
       friendRequests: [],
+      timelinePosts: createInitialTimelinePosts(),
       sentFriendPhones: [],
+      activeConversationId: null,
+      loadingConversations: false,
+      loadingFriends: false,
+      loadingMessages: {},
+      loadingMoreMessages: {},
+      hasMoreMessages: {},
+      nextCursorByConversation: {},
     }),
 }));
-

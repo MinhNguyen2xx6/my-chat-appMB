@@ -1,16 +1,12 @@
-// Genymotion: máy host là 10.0.3.2. Khi deploy thì đổi sang https://api.minhng.id.com
+import Config from 'react-native-config';
 
-//export const SERVER_URL = 'http://10.0.3.2:5001';
-//export const API_URL = `${SERVER_URL}/api`;
+// Ưu tiên biến môi trường SERVER_URL từ .env (react-native-config).
+// Dev (adb reverse): http://localhost:5001 | Production: bắt buộc HTTPS.
+const DEFAULT_SERVER_URL = __DEV__
+  ? 'http://localhost:5001'
+  : 'https://my-chat-yknz.onrender.com';
 
+const rawServerUrl = Config?.SERVER_URL?.trim() || DEFAULT_SERVER_URL;
 
-//export const SERVER_URL = 'https://my-chat-yknz.onrender.com';
-//export const API_URL = `${SERVER_URL}/api`;
-
-
-import { Platform } from 'react-native';
-
-// Khi dùng adb reverse (cho cả máy thật cắm USB lẫn giả lập), điện thoại gọi trực tiếp localhost:5001 tới máy tính
-export const SERVER_URL = 'http://localhost:5001';
+export const SERVER_URL = rawServerUrl.replace(/\/+$/, '');
 export const API_URL = `${SERVER_URL}/api`;
-

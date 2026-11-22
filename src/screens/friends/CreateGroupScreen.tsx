@@ -21,7 +21,7 @@ type NavProp = NativeStackNavigationProp<MainStackParamList>;
 export default function CreateGroupScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavProp>();
-  const { friends, createGroup } = useChatStore();
+  const friends = useChatStore((s) => s.friends);
 
   const [groupName, setGroupName] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -33,16 +33,10 @@ export default function CreateGroupScreen() {
   };
 
   const handleCreate = () => {
-    if (selectedIds.length < 2) {
-      Alert.alert(
-        'Chọn thêm thành viên',
-        'Vui lòng chọn ít nhất 2 bạn bè để tạo nhóm.',
-      );
-      return;
-    }
-    const name = groupName.trim() || `Nhóm ${selectedIds.length + 1} người`;
-    const newId = createGroup(name, selectedIds);
-    navigation.replace('ChatDetail', { conversationId: newId });
+    Alert.alert(
+      'Đang phát triển',
+      'Tính năng Tạo nhóm mới hiện đang được phát triển và sẽ sớm ra mắt khi hoàn thiện API máy chủ.',
+    );
   };
 
   return (
@@ -56,6 +50,8 @@ export default function CreateGroupScreen() {
         <TouchableOpacity
           style={styles.backBtn}
           onPress={() => navigation.goBack()}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityLabel="Quay lại"
         >
           <Text style={styles.backArrow}>←</Text>
         </TouchableOpacity>
@@ -63,6 +59,12 @@ export default function CreateGroupScreen() {
         <TouchableOpacity onPress={handleCreate}>
           <Text style={styles.createAction}>Tạo ({selectedIds.length})</Text>
         </TouchableOpacity>
+      </View>
+
+      <View style={styles.devBanner}>
+        <Text style={styles.devBannerText}>
+          🚧 Tính năng Tạo nhóm mới đang phát triển — chưa kết nối API máy chủ.
+        </Text>
       </View>
 
       <View style={styles.nameCard}>
@@ -106,6 +108,14 @@ export default function CreateGroupScreen() {
             </TouchableOpacity>
           );
         }}
+        ListEmptyComponent={
+          <View style={styles.emptyBox}>
+            <Text style={styles.emptyTitle}>Chưa có bạn bè nào</Text>
+            <Text style={styles.emptySub}>
+              Hãy kết bạn trước khi tạo nhóm trò chuyện.
+            </Text>
+          </View>
+        }
       />
     </View>
   );
@@ -149,6 +159,18 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: Theme.radius.pill,
     overflow: 'hidden',
+  },
+  devBanner: {
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#FDE68A',
+  },
+  devBannerText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: '#92400E',
   },
   nameCard: {
     flexDirection: 'row',
@@ -202,8 +224,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   checkboxChecked: {
-    backgroundColor: Theme.colors.primary,
-    borderColor: Theme.colors.primary,
+    backgroundColor: Theme.colors.primaryDark,
+    borderColor: Theme.colors.primaryDark,
   },
   checkMark: {
     color: '#FFFFFF',
@@ -222,5 +244,20 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     color: Theme.colors.textSecondary,
     marginTop: 2,
+  },
+  emptyBox: {
+    alignItems: 'center',
+    padding: 32,
+  },
+  emptyTitle: {
+    fontSize: 15.5,
+    fontWeight: '700',
+    color: Theme.colors.textPrimary,
+  },
+  emptySub: {
+    fontSize: 13,
+    color: Theme.colors.textSecondary,
+    marginTop: 4,
+    textAlign: 'center',
   },
 });

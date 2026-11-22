@@ -14,6 +14,7 @@ import Avatar from '../../components/common/Avatar';
 import { Theme } from '../../config/theme';
 import { useAuthStore } from '../../store/useAuthStore';
 import { MainStackParamList } from '../../types';
+import { resolveMediaUrl } from '../../utils/url';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -53,7 +54,13 @@ export default function ProfileScreen() {
         <Text style={styles.headerTitle}>Cá nhân</Text>
         <TouchableOpacity
           style={styles.headerBtn}
-          onPress={() => Alert.alert('Cài đặt', 'Tất cả cài đặt đang hiển thị bên dưới.')}
+          onPress={() =>
+            Alert.alert(
+              'Đang phát triển',
+              'Trang cài đặt nâng cao đang được phát triển.',
+            )
+          }
+          accessibilityLabel="Cài đặt (Đang phát triển)"
         >
           <Text style={styles.headerBtnIcon}>⚙️</Text>
         </TouchableOpacity>
@@ -76,7 +83,7 @@ export default function ProfileScreen() {
         >
           <Avatar
             name={displayName}
-            uri={user?.avatarUrl}
+            uri={resolveMediaUrl(user?.avatarUrl)}
             size={60}
             isOnline
           />
@@ -103,13 +110,23 @@ export default function ProfileScreen() {
                 styles.menuRow,
                 idx < SETTINGS_ITEMS.length - 1 && styles.menuDivider,
               ]}
-              onPress={() => Alert.alert(item.title, item.subtitle)}
+              onPress={() =>
+                Alert.alert(
+                  'Đang phát triển',
+                  `Tính năng "${item.title}" hiện đang được phát triển và sẽ sớm ra mắt.`,
+                )
+              }
             >
               <View style={styles.menuIconWrap}>
                 <Text style={styles.menuIcon}>{item.icon}</Text>
               </View>
               <View style={styles.menuBody}>
-                <Text style={styles.menuTitle}>{item.title}</Text>
+                <View style={styles.menuTitleRow}>
+                  <Text style={styles.menuTitle}>{item.title}</Text>
+                  <View style={styles.devBadge}>
+                    <Text style={styles.devBadgeText}>Đang phát triển</Text>
+                  </View>
+                </View>
                 <Text style={styles.menuSubtitle}>{item.subtitle}</Text>
               </View>
               <Text style={styles.chevron}>›</Text>
@@ -256,5 +273,22 @@ const styles = StyleSheet.create({
     color: Theme.colors.danger,
     fontSize: 15.5,
     fontWeight: '700',
+  },
+  menuTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  devBadge: {
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  devBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#B45309',
   },
 });

@@ -71,6 +71,9 @@ export default function ConversationItem({
           closeSwipe();
         }
       },
+      onPanResponderTerminate: () => {
+        closeSwipe();
+      },
     }),
   ).current;
 

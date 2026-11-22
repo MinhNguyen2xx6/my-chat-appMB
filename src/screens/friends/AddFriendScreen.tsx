@@ -32,6 +32,9 @@ import {
   searchUsersByName,
 } from '../../services/api/users';
 import { MainStackParamList } from '../../types';
+import { resolveMediaUrl } from '../../utils/url';
+
+const QR_CODE_REGEX = /^[A-Za-z0-9_-]{4,64}$/;
 
 type AddFriendRouteProp = RouteProp<MainStackParamList, 'AddFriend'>;
 
@@ -40,7 +43,12 @@ export default function AddFriendScreen() {
   const navigation = useNavigation();
   const route = useRoute<AddFriendRouteProp>();
   const user = useAuthStore((s) => s.user);
-  const { sentFriendPhones, sendFriendRequestById } = useChatStore();
+  const {
+    sentFriendPhones,
+    friendRequests,
+    sendFriendRequestById,
+    acceptFriendRequest,
+  } = useChatStore();
 
   const [tab, setTab] = useState<'username' | 'qr'>(
     route.params?.initialTab === 'qr' ? 'qr' : 'username',
@@ -50,6 +58,9 @@ export default function AddFriendScreen() {
   const [keyword, setKeyword] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
+  const [submittingIds, setSubmittingIds] = useState<Record<string, boolean>>(
+    {},
+  );
 
   // Tab Mã QR
   const [myQrCode, setMyQrCode] = useState<string>('');
@@ -66,27 +77,38 @@ export default function AddFriendScreen() {
   const scanLockRef = useRef(false);
   const backDevice = useCameraDevice('back');
 
-  // Tìm kiếm theo tên người dùng
+  // Tìm kiếm theo tên người dùng (chống race condition khi gõ nhanh)
   useEffect(() => {
     const q = keyword.trim();
     if (!q) {
       setSearchResults([]);
+      setSearching(false);
       return;
     }
 
+    let cancelled = false;
     const timer = setTimeout(async () => {
       try {
         setSearching(true);
         const { data } = await searchUsersByName(q);
-        setSearchResults(data.users || []);
+        if (!cancelled) {
+          setSearchResults(data.users || []);
+        }
       } catch (err) {
-        console.warn('Lỗi tìm kiếm bạn bè:', err);
+        if (__DEV__) {
+          console.warn('Lỗi tìm kiếm bạn bè:', err);
+        }
       } finally {
-        setSearching(false);
+        if (!cancelled) {
+          setSearching(false);
+        }
       }
     }, 400);
 
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [keyword]);
 
   // Tải mã QR của bản thân (tự động sinh cho cả tài khoản cũ lẫn mới)
@@ -116,10 +138,32 @@ export default function AddFriendScreen() {
     };
   }, [tab, myQrImage]);
 
-  const handleSend = async (targetId: string, targetName: string) => {
+  const handleSend = async (
+    targetId: string,
+    targetName: string,
+    relation?: string,
+  ) => {
+    if (submittingIds[targetId]) {
+      return;
+    }
     try {
-      const data = await sendFriendRequestById(targetId);
-      const nextRelation = data?.status === 'friend' ? 'friend' : 'sent';
+      setSubmittingIds((prev) => ({ ...prev, [targetId]: true }));
+
+      let nextRelation: 'friend' | 'sent' = 'sent';
+      if (relation === 'received') {
+        const matchedReq = friendRequests.find((r) => r.userId === targetId);
+        if (matchedReq) {
+          await acceptFriendRequest(matchedReq.id);
+          nextRelation = 'friend';
+        } else {
+          const data = await sendFriendRequestById(targetId);
+          nextRelation = data?.status === 'friend' ? 'friend' : 'sent';
+        }
+      } else {
+        const data = await sendFriendRequestById(targetId);
+        nextRelation = data?.status === 'friend' ? 'friend' : 'sent';
+      }
+
       setSearchResults((prev) =>
         prev.map((u) =>
           u._id === targetId ? { ...u, relation: nextRelation } : u,
@@ -139,13 +183,22 @@ export default function AddFriendScreen() {
         'Thông báo',
         err?.response?.data?.message || 'Không thể gửi lời mời kết bạn',
       );
+    } finally {
+      setSubmittingIds((prev) => ({ ...prev, [targetId]: false }));
     }
   };
 
   const lookupQrCode = useCallback(async (rawCode: string) => {
     const code = rawCode.trim();
     if (!code) {
-      Alert.alert('Thiếu mã QR', 'Vui lòng nhập hoặc quét mã QR của bạn bè.');
+      setQrError('Vui lòng nhập hoặc quét mã QR của bạn bè.');
+      return;
+    }
+    if (!QR_CODE_REGEX.test(code)) {
+      setQrResult(null);
+      setQrError(
+        'Mã QR không đúng định dạng MyChat (vd: MYCHAT-A1B2C3D4).',
+      );
       return;
     }
     try {
@@ -157,7 +210,8 @@ export default function AddFriendScreen() {
       setQrResult(data.user || null);
     } catch (err: any) {
       setQrError(
-        err?.response?.data?.message || 'Không tìm thấy tài khoản với mã QR này',
+        err?.response?.data?.message ||
+          'Không tìm thấy tài khoản với mã QR này',
       );
     } finally {
       setSearchingQr(false);
@@ -279,6 +333,7 @@ export default function AddFriendScreen() {
     const isSent = u.relation === 'sent' || sentFriendPhones.includes(u._id);
     const isFriend = u.relation === 'friend';
     const isReceived = u.relation === 'received';
+    const isSubmitting = Boolean(submittingIds[u._id]);
 
     let btnLabel = 'Kết bạn';
     if (isFriend) btnLabel = 'Bạn bè';
@@ -289,7 +344,7 @@ export default function AddFriendScreen() {
       <View key={u._id} style={styles.userCard}>
         <Avatar
           name={u.displayName || u.username}
-          uri={u.avatarUrl}
+          uri={resolveMediaUrl(u.avatarUrl)}
           size={48}
         />
         <View style={styles.userInfo}>
@@ -297,18 +352,27 @@ export default function AddFriendScreen() {
           <Text style={styles.userPhone}>@{u.username}</Text>
         </View>
         <TouchableOpacity
-          style={[styles.addBtn, (isSent || isFriend) && styles.addBtnSent]}
-          disabled={isSent || isFriend}
-          onPress={() => handleSend(u._id, u.displayName || u.username)}
+          style={[
+            styles.addBtn,
+            (isSent || isFriend || isSubmitting) && styles.addBtnSent,
+          ]}
+          disabled={isSent || isFriend || isSubmitting}
+          onPress={() =>
+            handleSend(u._id, u.displayName || u.username, u.relation)
+          }
         >
-          <Text
-            style={[
-              styles.addBtnText,
-              (isSent || isFriend) && styles.addBtnTextSent,
-            ]}
-          >
-            {btnLabel}
-          </Text>
+          {isSubmitting ? (
+            <ActivityIndicator size="small" color={Theme.colors.primaryDark} />
+          ) : (
+            <Text
+              style={[
+                styles.addBtnText,
+                (isSent || isFriend) && styles.addBtnTextSent,
+              ]}
+            >
+              {btnLabel}
+            </Text>
+          )}
         </TouchableOpacity>
       </View>
     );
@@ -325,6 +389,8 @@ export default function AddFriendScreen() {
         <TouchableOpacity
           style={styles.backBtn}
           onPress={() => navigation.goBack()}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityLabel="Quay lại"
         >
           <Text style={styles.backArrow}>←</Text>
         </TouchableOpacity>
@@ -358,7 +424,10 @@ export default function AddFriendScreen() {
       </View>
 
       {tab === 'username' ? (
-        <ScrollView contentContainerStyle={styles.scroll}>
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+        >
           <View style={styles.searchCard}>
             <Text style={styles.label}>Tìm bạn bè theo tên người dùng</Text>
             <View style={styles.inputRow}>
@@ -397,7 +466,10 @@ export default function AddFriendScreen() {
           )}
         </ScrollView>
       ) : (
-        <ScrollView contentContainerStyle={styles.qrScroll}>
+        <ScrollView
+          contentContainerStyle={styles.qrScroll}
+          keyboardShouldPersistTaps="handled"
+        >
           {/* Quét mã QR (Camera + Tải ảnh lên) */}
           <View style={styles.qrLookupCard}>
             <Text style={styles.label}>Quét mã QR để kết bạn</Text>

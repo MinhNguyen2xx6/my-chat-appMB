@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import { Theme } from '../../config/theme';
+import { useAuthStore } from '../../store/useAuthStore';
 import { CURRENT_USER_ID } from '../../store/useChatStore';
 import { Message } from '../../types';
 import { formatClockTime, formatVoiceDuration } from '../../utils/formatDate';
@@ -19,6 +20,7 @@ interface MessageBubbleProps {
   showSenderInfo: boolean;
   isLastOwnMessage: boolean;
   onPressImage?: (uri: string) => void;
+  onRetry?: (message: Message) => void;
 }
 
 const WAVE_BARS = [8, 16, 12, 22, 14, 18, 10, 24, 16, 12, 20, 14, 10, 16, 12];
@@ -29,8 +31,12 @@ export default function MessageBubble({
   showSenderInfo,
   isLastOwnMessage,
   onPressImage,
+  onRetry,
 }: MessageBubbleProps) {
-  const isMe = message.senderId === CURRENT_USER_ID;
+  const myUserId = useAuthStore((s) => s.user?._id);
+  const isMe =
+    (Boolean(myUserId) && message.senderId === String(myUserId)) ||
+    message.senderId === CURRENT_USER_ID;
   const [isPlayingVoice, setIsPlayingVoice] = useState(false);
   const [voiceProgress, setVoiceProgress] = useState(0);
 
@@ -41,19 +47,36 @@ export default function MessageBubble({
       return;
     }
     const timer = setInterval(() => {
-      setVoiceProgress((prev) => {
-        if (prev + 1 >= duration) {
-          setIsPlayingVoice(false);
-          return 0;
-        }
-        return prev + 1;
-      });
+      setVoiceProgress((prev) => prev + 1);
     }, 1000);
     return () => clearInterval(timer);
-  }, [isPlayingVoice, duration]);
+  }, [isPlayingVoice]);
+
+  useEffect(() => {
+    if (isPlayingVoice && voiceProgress >= duration) {
+      setIsPlayingVoice(false);
+      setVoiceProgress(0);
+    }
+  }, [isPlayingVoice, voiceProgress, duration]);
 
   const renderStatus = () => {
-    if (!isMe || !isLastOwnMessage) {
+    if (!isMe) {
+      return null;
+    }
+    if (message.status === 'failed') {
+      return (
+        <TouchableOpacity
+          style={styles.statusRow}
+          onPress={() => onRetry?.(message)}
+          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+        >
+          <Text style={[styles.statusText, styles.statusFailed]}>
+            ! Gửi thất bại • Nhấn để thử lại
+          </Text>
+        </TouchableOpacity>
+      );
+    }
+    if (!isLastOwnMessage && message.status !== 'sending') {
       return null;
     }
     let label = 'Đã gửi';
@@ -360,6 +383,10 @@ const styles = StyleSheet.create({
   },
   statusSeen: {
     color: Theme.colors.primaryDark,
+  },
+  statusFailed: {
+    color: Theme.colors.danger,
+    fontWeight: '600',
   },
   // Sticker
   stickerBox: {

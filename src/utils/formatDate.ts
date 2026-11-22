@@ -1,8 +1,30 @@
+function isValidTimestamp(timestamp: number): boolean {
+  return typeof timestamp === 'number' && Number.isFinite(timestamp) && timestamp > 0;
+}
+
+export function isSameCalendarDay(tsA: number, tsB: number): boolean {
+  const a = new Date(tsA);
+  const b = new Date(tsB);
+  return (
+    a.getDate() === b.getDate() &&
+    a.getMonth() === b.getMonth() &&
+    a.getFullYear() === b.getFullYear()
+  );
+}
+
+function isYesterdayCalendarDay(timestamp: number, now: number): boolean {
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  return isSameCalendarDay(timestamp, yesterday.getTime());
+}
+
 export function formatConversationTime(timestamp: number): string {
+  if (!isValidTimestamp(timestamp)) {
+    return '';
+  }
   const now = Date.now();
   const diffMs = now - timestamp;
   const diffMin = Math.floor(diffMs / 60000);
-  const diffHour = Math.floor(diffMs / 3600000);
 
   if (diffMin < 1) {
     return 'Vừa xong';
@@ -11,27 +33,42 @@ export function formatConversationTime(timestamp: number): string {
     return `${diffMin} phút`;
   }
 
-  const date = new Date(timestamp);
-  const today = new Date(now);
-  const isSameDay =
-    date.getDate() === today.getDate() &&
-    date.getMonth() === today.getMonth() &&
-    date.getFullYear() === today.getFullYear();
-
-  if (isSameDay) {
+  if (isSameCalendarDay(timestamp, now)) {
     return formatClockTime(timestamp);
   }
 
-  if (diffHour < 48) {
+  if (isYesterdayCalendarDay(timestamp, now)) {
     return 'Hôm qua';
   }
 
+  const date = new Date(timestamp);
   const day = String(date.getDate()).padStart(2, '0');
   const month = String(date.getMonth() + 1).padStart(2, '0');
   return `${day}/${month}`;
 }
 
+export function formatDateSeparator(timestamp: number): string {
+  if (!isValidTimestamp(timestamp)) {
+    return '';
+  }
+  const now = Date.now();
+  if (isSameCalendarDay(timestamp, now)) {
+    return 'Hôm nay';
+  }
+  if (isYesterdayCalendarDay(timestamp, now)) {
+    return 'Hôm qua';
+  }
+  const date = new Date(timestamp);
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
 export function formatClockTime(timestamp: number): string {
+  if (!isValidTimestamp(timestamp)) {
+    return '';
+  }
   const date = new Date(timestamp);
   const hours = String(date.getHours()).padStart(2, '0');
   const mins = String(date.getMinutes()).padStart(2, '0');
@@ -39,7 +76,8 @@ export function formatClockTime(timestamp: number): string {
 }
 
 export function formatVoiceDuration(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
+  const safeSec = Math.max(0, Math.floor(seconds || 0));
+  const mins = Math.floor(safeSec / 60);
+  const secs = safeSec % 60;
   return `${mins}:${String(secs).padStart(2, '0')}`;
 }
